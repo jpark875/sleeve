@@ -1,5 +1,6 @@
 """Render the app icon into src/sleeve/resources and packaging/icons."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def render(size: int = 1024) -> QImage:
 
 
 def main() -> int:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QGuiApplication(sys.argv)
     png = ROOT / "src" / "sleeve" / "resources" / "icon.png"
     png.parent.mkdir(parents=True, exist_ok=True)
