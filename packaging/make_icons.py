@@ -1,4 +1,4 @@
-"""Render the app icon. Writes src/sleeve/resources/icon.png and packaging/icons/sleeve.{ico,icns}."""
+"""Render the app icon into src/sleeve/resources and packaging/icons."""
 
 import sys
 from pathlib import Path
