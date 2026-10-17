@@ -136,7 +136,7 @@ def convert(
 
 def check(ffmpeg: Path) -> SleeveError | None:
     try:
-            out = subprocess.run(
+        out = subprocess.run(
             [str(ffmpeg), "-hide_banner", "-encoders"],
             capture_output=True,
             text=True,
