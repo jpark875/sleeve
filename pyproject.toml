@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sleeve"
+version = "0.1.0"
+description = "Get your own audio files ready for Spotify Local Files."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Jason Park" }]
+requires-python = ">=3.12"
+dependencies = [
+  "PySide6>=6.7",
+  "mutagen>=1.47",
+  "keyring>=25",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-qt>=4.4",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "imageio-ffmpeg>=0.5",
+]
+package = ["pyinstaller>=6.10"]
+
+[project.gui-scripts]
+sleeve = "sleeve.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["sleeve"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["mutagen.*", "keyring.*", "imageio_ffmpeg.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
