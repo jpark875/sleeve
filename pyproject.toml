@@ -52,3 +52,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
+
+[[tool.mypy.overrides]]
+module = ["sleeve.core.tags", "sleeve.core.formats"]
+disallow_untyped_calls = false
