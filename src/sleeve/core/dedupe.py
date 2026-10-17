@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,8 @@ class Manifest:
         self.path = folder / MANIFEST_NAME
         self._lock = threading.Lock()
         self._entries: dict[str, Entry] = {}
+        self._dirty = 0
+        self._flushed = time.monotonic()
         self._load()
 
     def _load(self) -> None:
@@ -69,6 +72,15 @@ class Manifest:
     def record(self, source_digest: str, entry: Entry) -> None:
         with self._lock:
             self._entries[source_digest] = entry
+            self._dirty += 1
+            due = self._dirty >= 25 or time.monotonic() - self._flushed > 2.0
+        if due:
+            self.flush()
+
+    def flush(self) -> None:
+        with self._lock:
+            if not self._dirty:
+                return
             payload = {
                 "version": 1,
                 "entries": {k: vars(v) for k, v in sorted(self._entries.items())},
@@ -76,19 +88,42 @@ class Manifest:
             tmp = self.path.with_name(self.path.name + ".tmp")
             tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False), "utf-8")
             os.replace(tmp, self.path)
+            self._dirty = 0
+            self._flushed = time.monotonic()
 
 
-def find_identical(folder: Path, source: Path, source_digest: str) -> Path | None:
-    """Return a file in folder that is byte-for-byte the same as source."""
-    try:
-        size = source.stat().st_size
-        candidates = [p for p in folder.iterdir() if p.is_file() and p.stat().st_size == size]
-    except OSError:
-        return None
-    for candidate in candidates:
+class SizeIndex:
+    """Files in a folder grouped by size, so identical-file checks only hash likely matches."""
+
+    def __init__(self, folder: Path) -> None:
+        self._lock = threading.Lock()
+        self._by_size: dict[int, list[Path]] = {}
         try:
-            if file_digest(candidate) == source_digest:
-                return candidate
+            for entry in os.scandir(folder):
+                if entry.is_file() and not entry.name.startswith("."):
+                    self._by_size.setdefault(entry.stat().st_size, []).append(Path(entry.path))
         except OSError:
-            continue
-    return None
+            pass
+
+    def add(self, path: Path) -> None:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return
+        with self._lock:
+            self._by_size.setdefault(size, []).append(path)
+
+    def find_identical(self, source: Path, source_digest: str) -> Path | None:
+        try:
+            size = source.stat().st_size
+        except OSError:
+            return None
+        with self._lock:
+            candidates = list(self._by_size.get(size, ()))
+        for candidate in candidates:
+            try:
+                if file_digest(candidate) == source_digest:
+                    return candidate
+            except OSError:
+                continue
+        return None

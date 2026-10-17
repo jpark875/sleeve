@@ -10,7 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from sleeve.core import errors
-from sleeve.core.dedupe import Entry, Manifest, file_digest, find_identical
+from sleeve.core.dedupe import Entry, Manifest, SizeIndex, file_digest
 from sleeve.core.errors import SleeveError
 from sleeve.core.ffmpeg import Cancelled, Encoding, convert
 from sleeve.core.formats import Action, Detected, Kind
@@ -119,9 +119,10 @@ class _Batch:
         self.on_progress = on_progress
         self.cancel = cancel
         self.manifest = Manifest(options.folder)
+        self.sizes = SizeIndex(options.folder)
         self.names_lock = threading.Lock()
         self.taken = existing_names(options.folder)
-        self.claimed: dict[tuple[str, str], int] = {}
+        self.claimed: dict[str, int] = {}
         self.fatal: str | None = None
 
     def target_for(self, job: Job, extension: str, previous: Entry | None) -> Path:
@@ -159,7 +160,7 @@ class _Batch:
 
         fingerprint = job.tags.fingerprint()
         with self.names_lock:
-            first = self.claimed.setdefault((digest, fingerprint), job.key)
+            first = self.claimed.setdefault(digest, job.key)
         if first != job.key:
             return Result(
                 job.key, Outcome.DUPLICATE, f"'{name}' is the same as another file in this list."
@@ -169,7 +170,7 @@ class _Batch:
             shown = entry.file if entry else name
             return Result(job.key, Outcome.DUPLICATE, f"'{name}' is already prepared as '{shown}'.")
         if job.detected.action is Action.COPY:
-            same = find_identical(self.options.folder, job.source, digest)
+            same = self.sizes.find_identical(job.source, digest)
             if same is not None:
                 return Result(
                     job.key,
@@ -206,6 +207,7 @@ class _Batch:
             if previous and previous.file != target.name:
                 (self.options.folder / previous.file).unlink(missing_ok=True)
             self.manifest.record(digest, Entry(target.name, file_digest(target), fingerprint))
+            self.sizes.add(target)
             self.on_progress(job.key, 1.0)
         except Cancelled:
             return Result(job.key, Outcome.CANCELLED)
@@ -251,8 +253,14 @@ def prepare(
             results.append(result)
         on_result(result)
 
-    with ThreadPoolExecutor(max_workers=max(1, options.workers)) as pool:
-        list(pool.map(work, jobs))
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, options.workers)) as pool:
+            list(pool.map(work, jobs))
+    finally:
+        try:
+            batch.manifest.flush()
+        except OSError:
+            log.exception("could not save manifest")
     order = {job.key: i for i, job in enumerate(jobs)}
     results.sort(key=lambda r: order[r.key])
     return Summary(results, batch.fatal)

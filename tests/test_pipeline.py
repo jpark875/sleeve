@@ -74,7 +74,7 @@ def test_duplicate_within_batch(tmp_path: Path, sources: Path, ffmpeg_path: Path
     copy = sources / "copy of tone.mp3"
     shutil.copy(sources / "tone.mp3", copy)
     summary = prepare(
-        [job(1, sources / "tone.mp3", title="X"), job(2, copy, title="X")],
+        [job(1, sources / "tone.mp3", title="X"), job(2, copy, title="Different title")],
         Options(tmp_path / "out", workers=1),
         ffmpeg=ffmpeg_path,
     )

@@ -1,7 +1,13 @@
 import shutil
 from pathlib import Path
 
-from sleeve.core.dedupe import MANIFEST_NAME, Entry, Manifest, file_digest, find_identical
+from sleeve.core.dedupe import (
+    MANIFEST_NAME,
+    Entry,
+    Manifest,
+    SizeIndex,
+    file_digest,
+)
 
 
 def test_file_digest_is_content_based(tmp_path: Path, data_dir: Path) -> None:
@@ -19,6 +25,7 @@ def test_manifest_round_trip_and_duplicate(tmp_path: Path) -> None:
     (out / "Song.mp3").write_bytes(b"prepared")
     manifest = Manifest(out)
     manifest.record("src1", Entry("Song.mp3", file_digest(out / "Song.mp3"), "tags1"))
+    manifest.flush()
 
     reloaded = Manifest(out)
     assert reloaded.is_duplicate("src1", "tags1")
@@ -42,12 +49,13 @@ def test_corrupt_manifest_is_ignored(tmp_path: Path) -> None:
     assert Manifest(tmp_path).lookup("x") is None
 
 
-def test_find_identical(tmp_path: Path, data_dir: Path) -> None:
-    out = tmp_path / "out"
-    out.mkdir()
-    shutil.copy(data_dir / "tone.mp3", out / "Whatever.mp3")
-    (out / "other.mp3").write_bytes(b"x" * (data_dir / "tone.mp3").stat().st_size)
+def test_size_index_matches_find_identical(tmp_path: Path, data_dir: Path) -> None:
+    shutil.copy(data_dir / "tone.mp3", tmp_path / "Copy.mp3")
+    index = SizeIndex(tmp_path)
     source = data_dir / "tone.mp3"
-    found = find_identical(out, source, file_digest(source))
-    assert found is not None and found.name == "Whatever.mp3"
-    assert find_identical(out, data_dir / "tone.m4a", file_digest(data_dir / "tone.m4a")) is None
+    assert index.find_identical(source, file_digest(source)) == tmp_path / "Copy.mp3"
+    other = data_dir / "tone.m4a"
+    assert index.find_identical(other, file_digest(other)) is None
+    shutil.copy(other, tmp_path / "Later.m4a")
+    index.add(tmp_path / "Later.m4a")
+    assert index.find_identical(other, file_digest(other)) == tmp_path / "Later.m4a"
