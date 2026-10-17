@@ -222,9 +222,9 @@ def _write_mp4(path: Path, tags: Tags) -> None:
     audio.save()
 
 
-def write_tags(path: Path, tags: Tags) -> None:
+def write_tags(path: Path, tags: Tags, suffix: str | None = None) -> None:
     """Write tags to an MP3 or M4A file, replacing the fields Sleeve manages."""
-    suffix = path.suffix.lower()
+    suffix = (suffix or path.suffix).lower()
     if suffix == ".mp3":
         _write_id3(path, tags)
     elif suffix in (".m4a", ".mp4"):
