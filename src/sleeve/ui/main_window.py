@@ -163,10 +163,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
 
         edit_menu = bar.addMenu("&Edit")
-        self.act_undo = self.model.undo.createUndoAction(self, "Undo")
-        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
-        self.act_redo = self.model.undo.createRedoAction(self, "Redo")
-        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
+        stack = self.model.undo
+        self.act_undo = self._action("Undo", stack.undo, QKeySequence.StandardKey.Undo)
+        self.act_redo = self._action("Redo", stack.redo, QKeySequence.StandardKey.Redo)
+        stack.indexChanged.connect(self._update_state)
         self.act_edit = self._action(
             "Edit selected tracks…", self.edit_selected, QKeySequence("Ctrl+I")
         )
@@ -217,6 +217,11 @@ class MainWindow(QMainWindow):
         self.act_add.setEnabled(not running)
         self.act_add_folder.setEnabled(not running)
         self.act_settings.setEnabled(not running)
+        stack = self.model.undo
+        self.act_undo.setEnabled(stack.canUndo() and not running)
+        self.act_redo.setEnabled(stack.canRedo() and not running)
+        self.act_undo.setText(f"Undo {stack.undoText()}".strip())
+        self.act_redo.setText(f"Redo {stack.redoText()}".strip())
         self.bottom.set_can_prepare(count > 0)
         if count:
             total = format_time(self.model.total_duration())

@@ -174,3 +174,14 @@ def test_prepare_needs_playlist_name(window: MainWindow, data_dir: Path) -> None
     window.prepare()
     assert window.prepare_cancel is None
     assert "playlist name" in window.message.text()
+
+
+def test_undo_blocked_while_running(window: MainWindow, data_dir: Path) -> None:
+    window.model.add([make_track(data_dir, title="Old")])
+    window.model.setData(window.model.index(0, Column.TITLE), "New")
+    assert window.act_undo.isEnabled()
+    assert window.act_undo.text() == "Undo Edit Title"
+    window.prepare_cancel = __import__("threading").Event()
+    window._update_state()
+    assert not window.act_undo.isEnabled()
+    window.prepare_cancel = None
