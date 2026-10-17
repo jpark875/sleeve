@@ -24,13 +24,16 @@ dev = [
   "mypy>=1.11",
   "imageio-ffmpeg>=0.5",
 ]
-package = ["pyinstaller>=6.10"]
+package = ["pyinstaller>=6.10", "pillow>=10"]
 
 [project.gui-scripts]
 sleeve = "sleeve.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sleeve = ["resources/*.png"]
 
 [tool.ruff]
 line-length = 100
