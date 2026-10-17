@@ -71,24 +71,25 @@ class Summary:
     def ready(self) -> int:
         return self.count(Outcome.READY, Outcome.UPDATED)
 
+    def problems(self) -> str:
+        parts = []
+        for outcomes, word in (
+            ((Outcome.SKIPPED, Outcome.DUPLICATE), "skipped"),
+            ((Outcome.FAILED,), "failed"),
+            ((Outcome.CANCELLED,), "cancelled"),
+        ):
+            if n := self.count(*outcomes):
+                parts.append(f"{n} {word}")
+        return ", ".join(parts)
+
     def text(self) -> str:
         if self.fatal:
             return self.fatal
         ready = self.ready
-        parts = [f"{ready} track{'s' if ready != 1 else ''} ready."]
-        skipped = self.count(Outcome.SKIPPED, Outcome.DUPLICATE)
-        failed = self.count(Outcome.FAILED)
-        cancelled = self.count(Outcome.CANCELLED)
-        extra = []
-        if skipped:
-            extra.append(f"{skipped} skipped")
-        if failed:
-            extra.append(f"{failed} failed")
-        if cancelled:
-            extra.append(f"{cancelled} cancelled")
-        if extra:
-            parts.append(", ".join(extra).capitalize() + " — see details.")
-        return " ".join(parts)
+        text = f"{ready} track{'s' if ready != 1 else ''} ready."
+        if problems := self.problems():
+            text += f" {problems.capitalize()} \u2014 see details."
+        return text
 
 
 ProgressFn = Callable[[int, float], None]

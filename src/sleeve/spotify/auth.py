@@ -211,8 +211,8 @@ class TokenStore:
             import keyring
 
             raw = keyring.get_password(KEYRING_SERVICE, KEYRING_USER)
-        except Exception:
-            log.warning("keychain unavailable", exc_info=True)
+        except Exception as exc:
+            log.warning("keychain unavailable: %s", type(exc).__name__)
             self.persistent = False
             return self._memory
         if not raw:
@@ -229,8 +229,8 @@ class TokenStore:
 
             keyring.set_password(KEYRING_SERVICE, KEYRING_USER, json.dumps(asdict(token)))
             self.persistent = True
-        except Exception:
-            log.warning("keychain unavailable, keeping token in memory", exc_info=True)
+        except Exception as exc:
+            log.warning("keychain unavailable, keeping token in memory: %s", type(exc).__name__)
             self.persistent = False
 
     def clear(self) -> None:
