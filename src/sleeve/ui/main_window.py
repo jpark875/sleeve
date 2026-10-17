@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self.store = store or TokenStore()
         self.pool = QThreadPool.globalInstance()
         self.ffmpeg = find_ffmpeg()
+        log.info("ffmpeg: %s", self.ffmpeg or "not found")
         self.scan_cancel = threading.Event()
         self.prepare_cancel: threading.Event | None = None
         self.scanning = 0
