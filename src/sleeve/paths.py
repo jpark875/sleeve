@@ -37,3 +37,11 @@ def default_output_root() -> Path:
     if root := _override():
         return root / "Music" / APP_NAME
     return Path.home() / "Music" / APP_NAME
+
+
+def create_folder(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return path.is_dir()

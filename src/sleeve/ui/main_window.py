@@ -28,6 +28,7 @@ from sleeve.core.ffmpeg import Encoding, find_ffmpeg
 from sleeve.core.formats import AUDIO_EXTENSIONS
 from sleeve.core.pipeline import Job, Options, Summary
 from sleeve.log import log_file
+from sleeve.paths import create_folder
 from sleeve.settings import Settings
 from sleeve.spotify.api import Playlist, SpotifyClient, SpotifyError
 from sleeve.spotify.auth import TokenStore
@@ -482,6 +483,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() == SettingsDialog.DialogCode.Accepted:
             dialog.apply()
             self.bottom.apply_settings(self.settings)
+            if not create_folder(Path(self.settings.output_root)):
+                self.set_message(
+                    f"Couldn't create '{self.settings.output_root}'. Create that folder "
+                    "yourself, or choose another one in Settings."
+                )
 
     def show_setup_guide(self) -> None:
         dialog = SetupGuide(Path(self.settings.output_root), self)
@@ -493,6 +499,7 @@ class MainWindow(QMainWindow):
         PhoneHelp(self).exec()
 
     def first_run(self) -> None:
+        create_folder(Path(self.settings.output_root))
         if not self.settings.setup_done:
             self.settings.setup_done = True
             self.settings.save()

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QLineEdit
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QLabel, QLineEdit
 from pytestqt.qtbot import QtBot
 
 from sleeve.core.formats import detect
@@ -185,3 +185,36 @@ def test_undo_blocked_while_running(window: MainWindow, data_dir: Path) -> None:
     window._update_state()
     assert not window.act_undo.isEnabled()
     window.prepare_cancel = None
+
+
+def test_setup_guide_creates_the_folder(qtbot: QtBot, tmp_path: Path) -> None:
+    from sleeve.ui.dialogs import SetupGuide
+
+    root = tmp_path / "Music" / "Sleeve"
+    guide = SetupGuide(root)
+    qtbot.addWidget(guide)
+    assert root.is_dir()
+    texts = " ".join(label.text() for label in guide.findChildren(QLabel))
+    assert "created for you" in texts
+    assert "<b>Sleeve</b>" in texts
+
+
+def test_setup_guide_explains_when_folder_cannot_be_created(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sleeve.ui import dialogs
+
+    monkeypatch.setattr(dialogs, "create_folder", lambda path: False)
+    root = tmp_path / "Music" / "Sleeve"
+    guide = dialogs.SetupGuide(root)
+    qtbot.addWidget(guide)
+    texts = " ".join(label.text() for label in guide.findChildren(QLabel))
+    assert "Create a folder named <b>Sleeve</b>" in texts
+    assert str(root.parent) in texts
+
+
+def test_first_run_creates_output_root(window: MainWindow) -> None:
+    root = Path(window.settings.output_root)
+    assert not root.exists()
+    window.first_run()
+    assert root.is_dir()

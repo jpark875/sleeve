@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from sleeve import APP_NAME, __version__
 from sleeve.core.pipeline import Outcome, Summary
 from sleeve.core.tags import Artwork
+from sleeve.paths import create_folder
 from sleeve.ui.artwork import load_artwork
 from sleeve.ui.platform import FILE_MANAGER, open_spotify, reveal
 from sleeve.ui.track_model import Track
@@ -47,7 +48,7 @@ def _steps(lines: list[str]) -> QLabel:
     return label
 
 
-def _path_row(path: Path, parent: QWidget) -> QWidget:
+def _path_row(path: Path, parent: QWidget, *, show: bool = False) -> QWidget:
     row = QWidget(parent)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -64,6 +65,11 @@ def _path_row(path: Path, parent: QWidget) -> QWidget:
     copy.clicked.connect(do_copy)
     layout.addWidget(field, 1)
     layout.addWidget(copy)
+    if show:
+        reveal_button = QPushButton("Show folder")
+        reveal_button.setToolTip(f"Open the folder in {FILE_MANAGER}")
+        reveal_button.clicked.connect(lambda: reveal(path))
+        layout.addWidget(reveal_button)
     return row
 
 
@@ -86,22 +92,35 @@ class SetupGuide(QDialog):
         self.setWindowTitle("Set up Spotify")
         layout = QVBoxLayout(self)
         layout.addWidget(_heading("Set up Spotify once"))
-        intro = QLabel(f"{APP_NAME} saves your tracks in this folder:")
+        ready = create_folder(root)
+        if ready:
+            intro = QLabel(
+                f"{APP_NAME} keeps your tracks in this folder. It's been created for you and "
+                "fills up as you prepare playlists:"
+            )
+        else:
+            intro = QLabel(
+                f"{APP_NAME} couldn't create its folder. Create a folder named "
+                f"<b>{_escape(root.name)}</b> inside <b>{_escape(str(root.parent))}</b>, "
+                "or choose another folder in Settings, then add it to Spotify:"
+            )
+        intro.setWordWrap(True)
         layout.addWidget(intro)
-        layout.addWidget(_path_row(root, self))
+        layout.addWidget(_path_row(root, self, show=ready))
         layout.addWidget(
             _steps(
                 [
                     "Open Spotify on this computer and go to <b>Settings</b>.",
                     "Turn on <b>Show Local Files</b>.",
-                    "Under <b>Show songs from</b>, click <b>Add a source</b> and choose the "
-                    "folder above.",
+                    "Under <b>Show songs from</b>, click <b>Add a source</b>. In the folder "
+                    f"picker, open <b>{_escape(root.parent.name or str(root.parent))}</b>, "
+                    f"select <b>{_escape(root.name)}</b> and confirm.",
                 ]
             )
         )
         note = QLabel(
             "You only need to do this once. Every playlist you prepare is saved inside this "
-            "folder, and its tracks appear in <b>Your Library › Local Files</b>."
+            "folder, and its tracks appear in <b>Your Library \u203a Local Files</b>."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -109,7 +128,7 @@ class SetupGuide(QDialog):
         buttons.addButton(_spotify_button(self), QDialogButtonBox.ButtonRole.ActionRole)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(540)
 
 
 class PhoneHelp(QDialog):
