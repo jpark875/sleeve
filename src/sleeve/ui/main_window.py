@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from sleeve import APP_NAME
 from sleeve.core.ffmpeg import Encoding, find_ffmpeg
-from sleeve.core.formats import AUDIO_EXTENSIONS
+from sleeve.core.formats import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 from sleeve.core.pipeline import Job, Options, Summary
 from sleeve.log import log_file
 from sleeve.paths import create_folder
@@ -51,7 +51,8 @@ from sleeve.ui.workers import PrepareWorker, ScanWorker, TaskWorker
 
 log = logging.getLogger(__name__)
 
-_AUDIO_FILTER = "Audio files ({})".format(" ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS)))
+_MEDIA = sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS)
+_AUDIO_FILTER = "Audio and video files ({})".format(" ".join(f"*{e}" for e in _MEDIA))
 
 
 def _plural(n: int, word: str) -> str:

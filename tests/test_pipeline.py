@@ -193,3 +193,18 @@ def test_summary_text() -> None:
     s = Summary([Result(1, Outcome.READY), Result(2, Outcome.FAILED)])
     assert s.text() == "1 track ready. 1 failed — see details."
     assert Summary([], fatal="Disk full.").text() == "Disk full."
+
+
+@pytest.mark.parametrize("name", ["clip.mp4", "clip.webm"])
+def test_extracts_audio_from_video(
+    tmp_path: Path, data_dir: Path, ffmpeg_path: Path, name: str
+) -> None:
+    summary = prepare(
+        [job(1, data_dir / name, title="Upload")], Options(tmp_path / "out"), ffmpeg=ffmpeg_path
+    )
+    result = summary.results[0]
+    assert result.outcome is Outcome.READY
+    assert result.path is not None and result.path.suffix == ".mp3"
+    out = detect(result.path)
+    assert out.kind.value == "MP3"
+    assert out.duration == pytest.approx(1.0, abs=0.15)

@@ -28,6 +28,9 @@ from sleeve.core.names import (
         ("Café del Mar \u2013 Remix.wav", "Café del Mar", "Remix"),
         ("夜に駆ける.flac", None, "夜に駆ける"),
         ("01.wav", None, "01"),
+        ("Night Drive (Official Music Video) [4K].mp4", None, "Night Drive"),
+        ("Band - Song [Lyrics] (HD).webm", "Band", "Song"),
+        ("Song (Radio Edit).mp3", None, "Song (Radio Edit)"),
     ],
 )
 def test_guess_from_filename(filename: str, artist: str | None, title: str) -> None:

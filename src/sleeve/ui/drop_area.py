@@ -9,7 +9,7 @@ class DropArea(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.highlighted = False
-        self.label = QLabel("Drop audio files or a folder here")
+        self.label = QLabel("Drop audio files, videos or a folder here")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         layout = QVBoxLayout(self)

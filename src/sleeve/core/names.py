@@ -13,6 +13,11 @@ _NOISE = re.compile(
     (?=$|[\s_\-.)\]])
     """
 )
+_BRACKET_NOISE = re.compile(
+    r"\s*[(\[][^()\[\]]*\b(?:official|lyrics?|visuali[sz]er|music video|video|audio|hd|hq"
+    r"|4k|1080p|720p)\b[^()\[\]]*[)\]]",
+    re.I,
+)
 _COPY_SUFFIX = re.compile(r"\s*[(\[]\s*(?:\d+|copy)\s*[)\]]\s*$", re.I)
 _EMPTY_BRACKETS = re.compile(r"[(\[]\s*[)\]]")
 _SPACES = re.compile(r"\s+")
@@ -40,6 +45,7 @@ def _smart_case(text: str) -> str:
 
 def _tidy(text: str) -> str:
     text = text.replace("_", " ")
+    text = _BRACKET_NOISE.sub("", text)
     text = _COPY_SUFFIX.sub("", text)
     previous = None
     while previous != text:

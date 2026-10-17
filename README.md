@@ -15,6 +15,9 @@ drag them into playlists yourself. Sleeve automates everything around that step:
 
 - **Formats.** MP3 and M4A (AAC) are copied as they are. WAV, AIFF, FLAC, ALAC, Ogg, Opus and
   WMA are converted with FFmpeg to MP3 (320 kbps constant bitrate) or M4A (AAC, 256 kbps).
+- **Videos.** MP4, MOV, M4V, WebM, MKV and AVI files are accepted too; Sleeve keeps only the
+  audio. For your own YouTube uploads, download the original from YouTube Studio (Content ›
+  ⋮ › Download) and drop it in. Sleeve doesn't download from YouTube links.
 - **Tags.** Spotify displays local files using their embedded tags. Sleeve reads existing tags,
   falls back to a cleaned-up file name (`01 - my_song_FINAL v2.wav` becomes `My Song`), and
   writes title, artist, album, track number and artwork into each prepared file.
@@ -30,7 +33,7 @@ app. Spotify's Web API can't add local files to playlists.
 
 ## Using Sleeve
 
-1. Drag audio files or a folder onto the window, or click **Add files…**.
+1. Drag audio files, videos or a folder onto the window, or click **Add files…**.
 2. Check the list. Double-click or press Enter to edit a title, artist or album; Tab moves to
    the next field. Select several rows and press **Cmd/Ctrl+I** to set the artist, album or
    artwork for all of them at once. Dropping an image on selected rows sets their artwork.
@@ -39,8 +42,9 @@ app. Spotify's Web API can't add local files to playlists.
 5. Follow the short checklist that appears:
    - **First time only:** in Spotify **Settings**, turn on **Show Local Files**. Under
      **Show songs from**, click **Add a source** and choose the `Sleeve` folder in your Music
-     folder. Every playlist folder sits inside it, so you only do this once
-     (**Help › Setup guide** has a **Copy folder path** button).
+     folder. Sleeve creates this folder when it starts, and every playlist folder sits inside
+     it, so you only do this once (**Help › Setup guide** has **Copy folder path** and
+     **Show folder** buttons).
    - In Spotify, open **Your Library › Local Files**.
    - Select the new tracks and drag them into your playlist.
 
