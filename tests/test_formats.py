@@ -30,6 +30,17 @@ def test_detect_by_content(name: str, kind: Kind, action: Action) -> None:
     assert detected.duration == pytest.approx(1.0, abs=0.1)
 
 
+@pytest.mark.parametrize("name", ["clip.mp4", "clip.webm"])
+def test_video_files_are_converted(name: str) -> None:
+    detected = detect(DATA / name)
+    assert detected.kind is Kind.VIDEO
+    assert detected.action is Action.CONVERT
+
+
+def test_video_without_audio_is_skipped() -> None:
+    assert detect(DATA / "silent.mp4").action is Action.SKIP
+
+
 def test_extension_is_ignored(tmp_path: Path) -> None:
     misnamed = tmp_path / "actually-a-wav.mp3"
     shutil.copy(DATA / "tone.wav", misnamed)
@@ -67,3 +78,4 @@ def test_is_candidate() -> None:
     assert is_candidate(Path("a/Song.FLAC"))
     assert not is_candidate(Path("a/._Song.mp3"))
     assert not is_candidate(Path("a/cover.jpg"))
+    assert is_candidate(Path("a/Upload.MOV"))

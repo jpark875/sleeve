@@ -3,6 +3,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import mutagen
+from mutagen.mp4._atom import Atoms
 
 
 class Kind(StrEnum):
@@ -17,6 +18,7 @@ class Kind(StrEnum):
     WMA = "WMA"
     ADTS = "AAC (raw)"
     MP4_OTHER = "MP4 audio"
+    VIDEO = "Video"
     UNKNOWN = "Unknown"
 
 
@@ -30,6 +32,7 @@ AUDIO_EXTENSIONS = {
     ".mp3", ".m4a", ".m4p", ".m4b", ".mp4", ".aac", ".wav", ".wave", ".aif", ".aiff",
     ".aifc", ".flac", ".ogg", ".oga", ".opus", ".wma", ".asf",
 }  # fmt: skip
+VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi"}
 
 _ASF_HEADER = bytes.fromhex("3026b2758e66cf11a6d900aa0062ce6c")
 _ASF_DRM = (
@@ -76,7 +79,23 @@ def _sniff(head: bytes) -> Kind:
         return Kind.OPUS if b"OpusHead" in head else Kind.VORBIS
     if head[:16] == _ASF_HEADER:
         return Kind.WMA
+    if head[:4] == b"\x1a\x45\xdf\xa3" or (head[:4] == b"RIFF" and head[8:12] == b"AVI "):
+        return Kind.VIDEO
     return Kind.UNKNOWN
+
+
+def _mp4_has_video(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            moov = Atoms(fh).path(b"moov")[-1]
+            for trak in moov.findall(b"trak"):
+                for handler in trak.findall(b"hdlr", True):
+                    ok, data = handler.read(fh)
+                    if ok and data[8:12] == b"vide":
+                        return True
+    except Exception:
+        return False
+    return False
 
 
 def detect(path: Path) -> Detected:
@@ -103,10 +122,14 @@ def detect(path: Path) -> Detected:
             kind = Kind.UNKNOWN
         elif codec == "alac":
             kind = Kind.ALAC
+        elif _mp4_has_video(path):
+            kind = Kind.VIDEO
         elif not codec.startswith("mp4a.40"):
             kind = Kind.MP4_OTHER
     return Detected(kind, protected, duration, channels)
 
 
 def is_candidate(path: Path) -> bool:
-    return path.suffix.lower() in AUDIO_EXTENSIONS and not path.name.startswith("._")
+    suffix = path.suffix.lower()
+    known = suffix in AUDIO_EXTENSIONS or suffix in VIDEO_EXTENSIONS
+    return known and not path.name.startswith("._")
