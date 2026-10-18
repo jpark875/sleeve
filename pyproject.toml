@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sleeve"
-version = "0.1.0"
-description = "Get your own audio files ready for Spotify Local Files."
+version = "0.2.0"
+description = "Move your music into Spotify: catalog matches go straight to a playlist, the rest become local files."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Jason Park" }]

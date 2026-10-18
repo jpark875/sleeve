@@ -1,7 +1,7 @@
 ; Inno Setup script for Sleeve. Build the app first (packaging\windows\build.ps1).
 #define AppName "Sleeve"
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 
 [Setup]

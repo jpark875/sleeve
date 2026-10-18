@@ -1,44 +1,64 @@
 # Sleeve
 
-A small desktop utility for macOS and Windows that gets your own audio files ready to play in
-Spotify. Drop in files or a folder, fix the titles, artists and artwork, pick a playlist name,
-and click **Prepare for Spotify**. Sleeve converts what Spotify can't play, writes clean tags,
-names the files consistently and saves everything into one folder that Spotify reads.
+Move your music into Spotify. Drop in a folder, a playlist file or an iTunes / Music library
+export, and Sleeve finds every song Spotify already has and adds it to a real Spotify playlist.
+Only the songs Spotify doesn't have (rare releases, your own recordings, old rips) are turned
+into clean, tagged local files, ready for Spotify's Local Files.
 
 <p align="center"><img src="packaging/icons/icon-1024.png" width="128" alt=""></p>
 
-## How it works, and what it can't do
+## How it works
 
-Spotify has no way to upload audio through its API. The only supported route is the desktop
-app's **Local Files** feature: Spotify shows audio files from folders on your computer, and you
-drag them into playlists yourself. Sleeve automates everything around that step:
+**Songs Spotify has go straight into the playlist.** With Spotify connected, each song is
+looked up as soon as it's added: by ISRC when the file has one, then by title and artist.
+Results are scored on title, artist and length. Confident matches show **On Spotify**; close
+calls show **Check match** and are confirmed by you before anything is added (a live version,
+a remaster, a cover). Catalog songs play on every device with no syncing and no Premium needed
+for local files.
+
+**Everything else becomes a local file.** Spotify has no upload API, so songs it doesn't have go
+through its desktop **Local Files** feature. Sleeve prepares them:
 
 - **Formats.** MP3 and M4A (AAC) are copied as they are. WAV, AIFF, FLAC, ALAC, Ogg, Opus and
   WMA are converted with FFmpeg to MP3 (320 kbps constant bitrate) or M4A (AAC, 256 kbps).
 - **Videos.** MP4, MOV, M4V, WebM, MKV and AVI files are accepted too; Sleeve keeps only the
   audio. For your own YouTube uploads, download the original from YouTube Studio (Content ›
   ⋮ › Download) and drop it in. Sleeve doesn't download from YouTube links.
-- **Tags.** Spotify displays local files using their embedded tags. Sleeve reads existing tags,
+- **Tags.** Spotify shows local files using their embedded tags. Sleeve reads existing tags,
   falls back to a cleaned-up file name (`01 - my_song_FINAL v2.wav` becomes `My Song`), and
-  writes title, artist, album, track number and artwork into each prepared file.
+  writes title, artist, album, track number, ISRC and artwork into each prepared file.
 - **Files.** Output goes to `~/Music/Sleeve/<Playlist name>/` as `Artist - Title.mp3`.
   Originals are only ever read, never changed or deleted.
-- **Duplicates.** Files that are already in the output folder are skipped, and so are
-  identical files added twice.
-- **Copy protection.** DRM-protected files (for example some `.m4p` or `.wma` purchases) are
-  skipped with a plain explanation. Sleeve never removes DRM.
+- **Duplicates.** Files already prepared are skipped, and so is identical audio added twice.
+  Songs already in the Spotify playlist aren't added again.
+- **Copy protection.** DRM-protected files (some `.m4p` or `.wma` purchases) are skipped with a
+  plain explanation. Sleeve never removes DRM.
 
-The last step, dragging the tracks into the playlist, has to happen in the Spotify desktop
-app. Spotify's Web API can't add local files to playlists.
+Dragging local files into the playlist has to happen in the Spotify desktop app: Spotify's Web
+API can't add local files to playlists. Without a Spotify connection, Sleeve prepares every song
+as a local file.
+
+### Importing a library
+
+**File › Import playlist…** (or drop the file on the window) reads:
+
+- **M3U / M3U8** playlists from most players, including `#EXTINF` titles and relative paths.
+- **iTunes / Music library exports** (`Library.xml`, from *File › Library › Export Library…*).
+  Pick the whole library or any playlist. Apple Music streaming songs with no file on your
+  computer are still matched on Spotify.
+
+The playlist name is filled in from the imported playlist, or from the folder you drop.
 
 ## Using Sleeve
 
-1. Drag audio files, videos or a folder onto the window, or click **Add files…**.
+1. Drag audio files, videos, a folder or a playlist onto the window, or click **Add files…**.
+   When Spotify is connected, the **Status** column fills in as songs are looked up.
 2. Check the list. Double-click or press Enter to edit a title, artist or album; Tab moves to
    the next field. Select several rows and press **Cmd/Ctrl+I** to set the artist, album or
    artwork for all of them at once. Dropping an image on selected rows sets their artwork.
 3. Type a playlist name, or pick a recent one.
-4. Click **Prepare for Spotify**. Each row shows its progress, and **Cancel** stops the run.
+4. Click **Add to Spotify** (or **Prepare for Spotify** when not connected). If some matches
+   need checking, Sleeve asks first. Each row shows its progress, and **Cancel** stops the run.
 5. Follow the short checklist that appears:
    - **First time only:** in Spotify **Settings**, turn on **Show Local Files**. Under
      **Show songs from**, click **Add a source** and choose the `Sleeve` folder in your Music
@@ -52,13 +72,15 @@ app. Spotify's Web API can't add local files to playlists.
 |---|---|
 | Cmd/Ctrl+O | Add files |
 | Cmd/Ctrl+Shift+O | Add folder |
+| Cmd/Ctrl+Shift+I | Import playlist |
+| Cmd/Ctrl+Shift+M | Check Spotify matches |
 | Enter | Edit the selected cell |
 | Tab / Shift+Tab | Next / previous field while editing |
 | Delete or Backspace | Remove selected rows from the list |
 | Cmd/Ctrl+A | Select all |
 | Cmd/Ctrl+Z | Undo tag edits and removals (redo: Cmd+Shift+Z / Ctrl+Y) |
 | Cmd/Ctrl+I | Edit selected tracks |
-| Cmd/Ctrl+Return | Prepare for Spotify |
+| Cmd/Ctrl+Return | Add to Spotify / Prepare for Spotify |
 
 ### Listening on your phone
 
@@ -73,25 +95,22 @@ Local files on a phone need **Spotify Premium**, and the phone and computer must
 If tracks stay grayed out, check that both devices use the same account and network (not a
 guest network), then restart Spotify on both.
 
-### Optional: connect Spotify
+### Connecting Spotify
 
-Connecting lets Sleeve create the playlist for you and open it in the Spotify app, so you only
-have to drag the tracks in. Everything else works without it.
+Click **Connect Spotify…** in the bottom bar; a short guide walks through it. Since February
+2026 Spotify only gives personal apps this access, so you create your own app once:
 
-Since February 2026, Spotify only gives Web API access to apps in Development Mode whose
-owner has Premium, with up to five allowlisted users per app. So you need your own app:
+1. In the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), create an app
+   (any name) and tick **Web API**. The account that owns it needs Premium.
+2. Add the redirect URI Sleeve shows (default `http://127.0.0.1:43817/callback`).
+3. Under **User Management**, add the Spotify account you'll connect with (up to five people).
+4. Paste the app's **Client ID** into Sleeve and click **Connect**.
 
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and
-   create an app. Choose **Web API**.
-2. Add the redirect URI shown in Sleeve's Settings (default
-   `http://127.0.0.1:43817/callback`).
-3. Under **User Management**, add the Spotify account you'll connect with.
-4. Copy the app's **Client ID** into Sleeve's Settings and click **Connect…**.
-
-Sleeve uses the Authorization Code flow with PKCE, so there is no client secret. The token is
-kept in the macOS Keychain or Windows Credential Manager. If Spotify refuses a request
-(expired sign-in, not on the user list, rate limit, or `QUOTA_EXCEEDED`), Sleeve says so in
-plain language and the prepared files are still there.
+Sign-in uses the Authorization Code flow with PKCE, so there is no client secret, and the token
+is kept in the macOS Keychain or Windows Credential Manager. Search results are cached for 30
+days so repeat runs are fast. If Spotify slows requests down, Sleeve waits and carries on; if it
+refuses them (expired sign-in, not on the user list, `QUOTA_EXCEEDED`), Sleeve says so in plain
+language and still prepares your local files.
 
 ### Where things are
 
@@ -126,15 +145,16 @@ QT_QPA_PLATFORM=offscreen pytest
 ```
 
 The tests cover file-name cleanup, format detection (including DRM), tag reading and writing,
-duplicate detection, the full prepare pipeline with real FFmpeg conversions, the Spotify
-client and sign-in flow against a fake server, and the main window driven with pytest-qt.
+duplicate detection, match scoring, M3U and iTunes library import, the full prepare pipeline
+with real FFmpeg conversions, the Spotify client and sign-in flow, and the main window driven
+end to end with pytest-qt against a fake Spotify Web API.
 
 ### Layout
 
 ```
 src/sleeve/
-  core/       names, formats, tags, ffmpeg, dedupe, pipeline, errors (no Qt)
-  spotify/    PKCE sign-in, token storage, playlist client (no Qt)
+  core/       names, formats, tags, ffmpeg, dedupe, pipeline, matching, library (no Qt)
+  spotify/    PKCE sign-in, token storage, catalog search, playlists, matcher (no Qt)
   ui/         main window, track table and model, dialogs, background workers
   app.py      entry point
 packaging/    PyInstaller spec, FFmpeg fetcher, icons, macOS and Windows build scripts
