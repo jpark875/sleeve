@@ -32,6 +32,7 @@ def test_round_trip(tmp_path: Path, data_dir: Path, art: Artwork, name: str) -> 
         track=7,
         year="2020",
         genre="J-Pop",
+        isrc="JPU902002016",
         artwork=art,
     )
     write_tags(path, tags)
@@ -130,3 +131,12 @@ def test_artwork_rejects_unknown_bytes() -> None:
 def test_write_rejects_other_formats(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         write_tags(tmp_path / "x.wav", Tags())
+
+
+def test_isrc_is_normalized(tmp_path: Path, data_dir: Path) -> None:
+    path = tmp_path / "tone.flac"
+    shutil.copy(data_dir / "tone.flac", path)
+    audio = FLAC(path)
+    audio["isrc"] = "us-um7-15-00123"
+    audio.save()
+    assert read_tags(path).isrc == "USUM71500123"

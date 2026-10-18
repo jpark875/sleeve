@@ -7,10 +7,24 @@ from typing import Any
 import mutagen
 from mutagen.asf import ASF
 from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK, ID3NoHeaderError
-from mutagen.mp4 import MP4, MP4Cover
+from mutagen.id3 import (
+    APIC,
+    ID3,
+    TALB,
+    TCON,
+    TDRC,
+    TIT2,
+    TPE1,
+    TPE2,
+    TRCK,
+    TSRC,
+    ID3NoHeaderError,
+)
+from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 
-FIELDS = ("title", "artist", "album", "album_artist", "track", "year", "genre")
+_MP4_ISRC = "----:com.apple.iTunes:ISRC"
+
+FIELDS = ("title", "artist", "album", "album_artist", "track", "year", "genre", "isrc")
 
 
 @dataclass(frozen=True)
@@ -40,6 +54,7 @@ class Tags:
     track: int | None = None
     year: str = ""
     genre: str = ""
+    isrc: str = ""
     artwork: Artwork | None = field(default=None, repr=False)
 
     def copy(self, **changes: Any) -> "Tags":
@@ -71,6 +86,13 @@ def _track_number(value: Any) -> int | None:
     return int(text) if text.isdigit() and int(text) > 0 else None
 
 
+def _isrc(value: Any) -> str:
+    if isinstance(value, list) and value and isinstance(value[0], bytes | bytearray):
+        value = bytes(value[0]).decode("utf-8", "ignore")
+    text = "".join(ch for ch in _first(value).upper() if ch.isalnum())
+    return text if len(text) == 12 else ""
+
+
 def _picture_artwork(pictures: list[Picture]) -> Artwork | None:
     if not pictures:
         return None
@@ -92,6 +114,7 @@ def _from_id3(tags: ID3) -> Tags:
         track=_track_number(tags.get("TRCK")),
         year=_first(tags.get("TDRC"))[:4],
         genre=_first(tags.get("TCON")),
+        isrc=_isrc(tags.get("TSRC")),
         artwork=art,
     )
 
@@ -107,6 +130,7 @@ def _from_mp4(audio: MP4) -> Tags:
         track=_track_number(tags.get("trkn")),
         year=_first(tags.get("\xa9day"))[:4],
         genre=_first(tags.get("\xa9gen")),
+        isrc=_isrc(tags.get(_MP4_ISRC)),
         artwork=Artwork.from_bytes(bytes(covers[0])) if covers else None,
     )
 
@@ -133,6 +157,7 @@ def _from_vorbis(audio: Any) -> Tags:
         track=_track_number(tags.get("tracknumber")),
         year=_first(tags.get("date"))[:4],
         genre=_first(tags.get("genre")),
+        isrc=_isrc(tags.get("isrc")),
         artwork=art,
     )
 
@@ -147,6 +172,7 @@ def _from_asf(audio: ASF) -> Tags:
         track=_track_number(tags.get("WM/TrackNumber")),
         year=_first(tags.get("WM/Year"))[:4],
         genre=_first(tags.get("WM/Genre")),
+        isrc=_isrc(tags.get("WM/ISRC")),
     )
 
 
@@ -182,6 +208,7 @@ def _write_id3(path: Path, tags: Tags) -> None:
         ("TRCK", TRCK, str(tags.track) if tags.track else ""),
         ("TDRC", TDRC, tags.year),
         ("TCON", TCON, tags.genre),
+        ("TSRC", TSRC, tags.isrc),
     ):
         id3.delall(frame_id)
         if value:
@@ -205,6 +232,10 @@ def _write_mp4(path: Path, tags: Tags) -> None:
         "\xa9day": tags.year,
         "\xa9gen": tags.genre,
     }
+    if tags.isrc:
+        audio.tags[_MP4_ISRC] = [MP4FreeForm(tags.isrc.encode())]
+    else:
+        audio.tags.pop(_MP4_ISRC, None)
     for key, value in text.items():
         if value:
             audio.tags[key] = [value]
