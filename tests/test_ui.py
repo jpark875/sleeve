@@ -15,6 +15,7 @@ from sleeve.ui.track_model import Column, Track, TrackModel
 from sleeve.ui.workers import load_track
 
 from .conftest import png_bytes
+from .fake_spotify import FakeSpotify, MemoryStore, track
 
 
 def make_track(data_dir: Path, name: str = "tone.mp3", **tags: str) -> Track:
@@ -80,8 +81,8 @@ def test_remove_and_undo(data_dir: Path) -> None:
 
 def test_add_ignores_same_file_twice(data_dir: Path) -> None:
     model = TrackModel()
-    assert model.add([make_track(data_dir)]) == 1
-    assert model.add([make_track(data_dir)]) == 0
+    assert len(model.add([make_track(data_dir)])) == 1
+    assert len(model.add([make_track(data_dir)])) == 0
 
 
 def test_locked_model_is_read_only(data_dir: Path) -> None:
@@ -161,7 +162,7 @@ def test_prepare_end_to_end(
     qtbot.waitUntil(lambda: window.prepare_cancel is None, timeout=15000)
     out = tmp_path / "Music" / "Sleeve" / "Late Night - Demos"
     assert sorted(p.suffix for p in out.iterdir() if not p.name.startswith(".")) == [".mp3", ".mp3"]
-    assert "2 tracks ready. 1 skipped" in window.message.text()
+    assert "2 files ready for Local Files. 1 skipped." in window.message.text()
     assert isinstance(window._dialog, FinishDialog)
     assert window.settings.recent_playlists[0] == "Late Night / Demos"
     statuses = [window.model.data(window.model.index(r, Column.STATUS)) for r in range(3)]
@@ -218,3 +219,170 @@ def test_first_run_creates_output_root(window: MainWindow) -> None:
     assert not root.exists()
     window.first_run()
     assert root.is_dir()
+
+
+CATALOG = [
+    track("Hey Jude", "The Beatles", "spotify:track:jude"),
+    track("Motion Sickness", "Phoebe Bridgers", "spotify:track:motion"),
+]
+
+
+@pytest.fixture
+def connected(window: MainWindow) -> MainWindow:
+    window.store = MemoryStore()  # type: ignore[assignment]
+    window.settings.spotify_client_id = "cid"
+    window.transport = FakeSpotify(CATALOG)
+    window.refresh_connection()
+    return window
+
+
+def add_mixed(window: MainWindow, tmp_path: Path, data_dir: Path) -> None:
+    from sleeve.core.library import Entry
+    from sleeve.ui.workers import track_from_entry
+
+    jude = tmp_path / "jude.mp3"
+    demo = tmp_path / "demo.wav"
+    shutil.copy(data_dir / "tone.mp3", jude)
+    shutil.copy(data_dir / "tone.wav", demo)
+    tracks = [
+        track_from_entry(Entry("Hey Jude", "The Beatles", duration=1.0, path=jude)),
+        track_from_entry(Entry("My Demo", "Me", duration=1.0, path=demo)),
+        track_from_entry(Entry("Motion Sickness", "Phoebe Bridgers", duration=1.0)),
+        track_from_entry(Entry("Lost Song", "Nobody", duration=1.0)),
+    ]
+    window._found(tracks)
+
+
+def test_connected_flow_adds_catalog_songs_and_prepares_the_rest(
+    connected: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    from sleeve.core.matching import MatchState
+
+    window = connected
+    assert window.bottom.primary.text() == "Add to Spotify"
+    add_mixed(window, tmp_path, data_dir)
+    qtbot.waitUntil(lambda: not window.matching and not window.match_queue, timeout=5000)
+    states = [t.match.state for t in window.model.tracks]
+    assert states == [
+        MatchState.FOUND,
+        MatchState.NOT_FOUND,
+        MatchState.FOUND,
+        MatchState.NOT_FOUND,
+    ]
+    statuses = [window.model.data(window.model.index(r, Column.STATUS)) for r in range(4)]
+    assert statuses == ["On Spotify", "Will convert", "On Spotify", "No file"]
+
+    window.bottom.playlist.setEditText("Road Trip")
+    window.prepare()
+    qtbot.waitUntil(lambda: window.prepare_cancel is None, timeout=15000)
+    spotify = window.transport
+    assert isinstance(spotify, FakeSpotify)
+    assert spotify.created == ["Road Trip"]
+    assert spotify.playlist == ["spotify:track:jude", "spotify:track:motion"]
+    report = window.report
+    assert report is not None
+    assert (report.added, report.local_ready, report.missing) == (2, 1, 1)
+    files = [
+        p.name
+        for p in (tmp_path / "Music" / "Sleeve" / "Road Trip").iterdir()
+        if not p.name.startswith(".")
+    ]
+    assert files == ["Me - My Demo.mp3"]
+    statuses = [window.model.data(window.model.index(r, Column.STATUS)) for r in range(4)]
+    assert statuses == ["Added", "Ready", "Added", "Not found"]
+    assert isinstance(window._dialog, FinishDialog)
+
+    window._dialog.close()
+    window.prepare()
+    qtbot.waitUntil(lambda: window.prepare_cancel is None, timeout=15000)
+    assert spotify.playlist == ["spotify:track:jude", "spotify:track:motion"]
+    assert window.report is not None and window.report.already == 2
+
+
+def test_prepare_waits_for_search_to_finish(
+    connected: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    window = connected
+    add_mixed(window, tmp_path, data_dir)
+    window.bottom.playlist.setEditText("Road Trip")
+    window.prepare()
+    assert window.prepare_after_match
+    qtbot.waitUntil(
+        lambda: window.report is not None and window.prepare_cancel is None, timeout=15000
+    )
+    assert window.report is not None and window.report.added == 2
+
+
+def test_spotify_refusal_is_reported(
+    connected: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    window = connected
+    window.transport.fail_add = 403  # type: ignore[attr-defined]
+    add_mixed(window, tmp_path, data_dir)
+    qtbot.waitUntil(lambda: not window.matching and not window.match_queue, timeout=5000)
+    window.bottom.playlist.setEditText("Road Trip")
+    window.prepare()
+    qtbot.waitUntil(lambda: window.prepare_cancel is None, timeout=15000)
+    report = window.report
+    assert report is not None and "user list" in report.spotify_error
+    assert report.local_ready == 1
+    status = window.model.data(window.model.index(0, Column.STATUS))
+    assert status == "Not added"
+
+
+def test_editing_a_title_searches_again(
+    connected: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    from sleeve.core.matching import MatchState
+
+    window = connected
+    add_mixed(window, tmp_path, data_dir)
+    qtbot.waitUntil(lambda: not window.matching and not window.match_queue, timeout=5000)
+    row = 3
+    window.model.setData(window.model.index(row, Column.TITLE), "Hey Jude")
+    window.model.setData(window.model.index(row, Column.ARTIST), "The Beatles")
+    qtbot.waitUntil(lambda: window.model.tracks[row].match.state is MatchState.FOUND, timeout=5000)
+
+
+def test_review_dialog_decisions(qtbot: QtBot, data_dir: Path) -> None:
+    from sleeve.core.matching import Candidate, Match, MatchState
+    from sleeve.ui.spotify_dialogs import ReviewDialog
+
+    cands = (Candidate("spotify:track:a", "Yesterday", ("The Beatles",), "Help!", 125.0, "", 0.7),)
+    one = make_track(data_dir, title="Yesterday", artist="My Band")
+    one.match = Match(MatchState.REVIEW, cands, cands[0])
+    two = make_track(data_dir, "tone.wav", title="Yesterday", artist="Other")
+    two.match = Match(MatchState.REVIEW, cands, cands[0])
+    dialog = ReviewDialog([one, two])
+    qtbot.addWidget(dialog)
+    dialog.combos[two.id].setCurrentIndex(dialog.combos[two.id].count() - 1)
+    decisions = dialog.decisions()
+    assert decisions[one.id].state is MatchState.FOUND
+    assert decisions[two.id].state is MatchState.KEEP_LOCAL
+
+
+def test_import_m3u_sets_playlist_name(
+    window: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    shutil.copy(data_dir / "tone.mp3", tmp_path / "a.mp3")
+    playlist = tmp_path / "Summer 2019.m3u8"
+    playlist.write_text(
+        "#EXTM3U\n#EXTINF:1,Band - Song\na.mp3\n#EXTINF:200,Gone - Missing\nb.mp3\n"
+    )
+    window.bottom.playlist.setEditText("")
+    window.add_paths([playlist])
+    qtbot.waitUntil(lambda: len(window.model.tracks) == 2 and window.scanning == 0, timeout=5000)
+    assert window.bottom.playlist_name() == "Summer 2019"
+    assert [t.has_file for t in window.model.tracks] == [True, False]
+
+
+def test_dropping_a_folder_names_the_playlist(
+    window: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    folder = tmp_path / "Garage Demos"
+    folder.mkdir()
+    shutil.copy(data_dir / "tone.mp3", folder / "a.mp3")
+    window.bottom.playlist.setEditText("")
+    window.add_paths([folder])
+    qtbot.waitUntil(lambda: window.scanning == 0 and len(window.model.tracks) == 1, timeout=5000)
+    assert window.bottom.playlist_name() == "Garage Demos"
