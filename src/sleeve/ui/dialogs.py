@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from sleeve import APP_NAME, __version__
+from sleeve.core.library import Playlist
 from sleeve.core.pipeline import Outcome, Summary
 from sleeve.core.tags import Artwork
 from sleeve.paths import create_folder
@@ -31,7 +35,7 @@ from sleeve.ui.track_model import Track
 _KEEP = "Mixed — leave unchanged"
 
 
-def _heading(text: str) -> QLabel:
+def heading(text: str) -> QLabel:
     label = QLabel(text)
     font = label.font()
     font.setPointSizeF(font.pointSizeF() * 1.15)
@@ -91,7 +95,7 @@ class SetupGuide(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Set up Spotify")
         layout = QVBoxLayout(self)
-        layout.addWidget(_heading("Set up Spotify once"))
+        layout.addWidget(heading("Set up Spotify once"))
         ready = create_folder(root)
         if ready:
             intro = QLabel(
@@ -136,7 +140,7 @@ class PhoneHelp(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Listen on your phone")
         layout = QVBoxLayout(self)
-        layout.addWidget(_heading("Listen on your phone"))
+        layout.addWidget(heading("Listen on your phone"))
         need = QLabel(
             "Playing local files on a phone needs <b>Spotify Premium</b>, and the phone "
             "and computer must be on the <b>same Wi-Fi network</b>."
@@ -166,66 +170,133 @@ class PhoneHelp(QDialog):
         self.setMinimumWidth(480)
 
 
+@dataclass
+class RunReport:
+    playlist: str
+    folder: Path
+    summary: Summary | None = None
+    added: int = 0
+    already: int = 0
+    playlist_uri: str | None = None
+    spotify_error: str = ""
+    missing: int = 0
+    connected: bool = False
+
+    @property
+    def local_ready(self) -> int:
+        return self.summary.ready if self.summary else 0
+
+
+def _songs(n: int) -> str:
+    return f"{n} song{'s' if n != 1 else ''}"
+
+
 class FinishDialog(QDialog):
-    def __init__(
-        self,
-        summary: Summary,
-        folder: Path,
-        playlist: str,
-        playlist_uri: str | None,
-        spotify_note: str,
-        parent: QWidget | None = None,
-    ) -> None:
+    def __init__(self, report: RunReport, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Ready for Spotify")
+        self.setWindowTitle("Done")
         layout = QVBoxLayout(self)
-        ready = summary.ready
-        headline = (
-            f"{ready} track{'s are' if ready != 1 else ' is'} ready"
-            if ready
-            else "No new tracks to add"
-        )
-        layout.addWidget(_heading(headline))
-        if problems := summary.problems():
-            detail = QLabel(f"{problems.capitalize()}. See details in the main window.")
-            detail.setWordWrap(True)
-            layout.addWidget(detail)
-        layout.addWidget(_path_row(folder, self))
-        drag = f"Select the new tracks and drag them into <b>{_escape(playlist)}</b>."
-        if playlist_uri:
-            drag = (
-                f"Select the new tracks and drag them into <b>{_escape(playlist)}</b>, "
-                "which is now in your Spotify library."
+        name = _escape(report.playlist)
+        local = report.local_ready
+        if report.added:
+            headline = f"Added {_songs(report.added)} to \u201c{report.playlist}\u201d on Spotify"
+        elif report.already and not local:
+            headline = f"\u201c{report.playlist}\u201d already has these songs"
+        elif local:
+            headline = f"{_songs(local)} ready to add from your computer"
+        else:
+            headline = "Nothing new to add"
+        layout.addWidget(heading(headline))
+
+        lines = []
+        if report.added and report.already:
+            lines.append(f"{_songs(report.already)} were already in the playlist.")
+        if report.spotify_error:
+            lines.append(f"Spotify: {_escape(report.spotify_error)}")
+        if report.missing:
+            lines.append(
+                f"{_songs(report.missing)} weren't found on Spotify, and their files aren't on "
+                "this computer."
             )
-        layout.addWidget(
-            _steps(
-                [
-                    "First time only: in Spotify <b>Settings</b>, turn on <b>Show Local "
-                    f"Files</b> and add the <b>{APP_NAME}</b> folder as a source "
-                    "(Help › Setup guide).",
-                    "In Spotify, open <b>Your Library › Local Files</b>.",
-                    drag,
-                ]
+        if report.summary and (problems := report.summary.problems()):
+            lines.append(f"{problems.capitalize()} \u2014 see details in the main window.")
+        for line in lines:
+            label = QLabel(line)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+
+        if local:
+            if report.connected and (report.added or report.already):
+                intro = QLabel(
+                    f"<br>{_songs(local)} aren't on Spotify, so {APP_NAME} saved your own "
+                    f"files. Add them to <b>{name}</b> from Local Files:"
+                )
+                intro.setWordWrap(True)
+                layout.addWidget(intro)
+            layout.addWidget(_path_row(report.folder, self))
+            target = (
+                f"<b>{name}</b>, which is in your Spotify library"
+                if report.playlist_uri
+                else f"your playlist <b>{name}</b>"
             )
-        )
-        if spotify_note:
-            note = QLabel(spotify_note)
-            note.setWordWrap(True)
-            layout.addWidget(note)
+            layout.addWidget(
+                _steps(
+                    [
+                        "First time only: in Spotify <b>Settings</b>, turn on <b>Show Local "
+                        f"Files</b> and add the <b>{APP_NAME}</b> folder as a source "
+                        "(Help \u203a Setup guide).",
+                        "In Spotify, open <b>Your Library \u203a Local Files</b>.",
+                        f"Select the new songs and drag them into {target}.",
+                    ]
+                )
+            )
         buttons = QDialogButtonBox()
-        show = QPushButton("Show files")
-        show.setToolTip(f"Show the folder in {FILE_MANAGER}")
-        show.clicked.connect(lambda: reveal(folder))
-        buttons.addButton(show, QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(
-            _spotify_button(self, playlist_uri or "spotify:"),
-            QDialogButtonBox.ButtonRole.ActionRole,
-        )
+        if local:
+            show = QPushButton("Show files")
+            show.setToolTip(f"Show the folder in {FILE_MANAGER}")
+            show.clicked.connect(lambda: reveal(report.folder))
+            buttons.addButton(show, QDialogButtonBox.ButtonRole.ActionRole)
+        open_button = _spotify_button(self, report.playlist_uri or "spotify:")
+        if report.playlist_uri:
+            open_button.setText("Open playlist")
+        buttons.addButton(open_button, QDialogButtonBox.ButtonRole.ActionRole)
         done = buttons.addButton("Done", QDialogButtonBox.ButtonRole.AcceptRole)
         done.setDefault(True)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
-        self.setMinimumWidth(540)
+        self.setMinimumWidth(560)
+
+
+class PlaylistPicker(QDialog):
+    def __init__(
+        self, source: str, playlists: list[Playlist], parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Import playlist")
+        self.playlists = playlists
+        layout = QVBoxLayout(self)
+        layout.addWidget(heading("Choose a playlist"))
+        intro = QLabel(f"From {_escape(source)}:")
+        layout.addWidget(intro)
+        self.list = QListWidget()
+        for playlist in playlists:
+            item = QListWidgetItem(f"{playlist.name}  \u00b7  {_songs(len(playlist.entries))}")
+            self.list.addItem(item)
+        self.list.setCurrentRow(1 if len(playlists) > 1 else 0)
+        self.list.itemDoubleClicked.connect(lambda item: self.accept())
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.resize(460, 420)
+
+    def chosen(self) -> Playlist | None:
+        row = self.list.currentRow()
+        return self.playlists[row] if 0 <= row < len(self.playlists) else None
 
 
 def _escape(text: str) -> str:

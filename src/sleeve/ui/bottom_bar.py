@@ -9,11 +9,13 @@ class BottomBar(QFrame):
     add_clicked = Signal()
     prepare_clicked = Signal()
     cancel_clicked = Signal()
+    spotify_clicked = Signal()
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.running = False
+        self.connected = False
 
         self.add_button = QPushButton("Add files…")
         self.add_button.clicked.connect(self.add_clicked)
@@ -36,6 +38,11 @@ class BottomBar(QFrame):
         format_label = QLabel("Format:")
         format_label.setBuddy(self.format)
 
+        self.spotify = QPushButton()
+        self.spotify.setFlat(True)
+        self.spotify.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.spotify.clicked.connect(self.spotify_clicked)
+
         self.primary = QPushButton("Prepare for Spotify")
         self.primary.setDefault(True)
         self.primary.setAutoDefault(True)
@@ -45,6 +52,7 @@ class BottomBar(QFrame):
         layout.setContentsMargins(12, 8, 12, 10)
         layout.setSpacing(8)
         layout.addWidget(self.add_button)
+        layout.addWidget(self.spotify)
         layout.addStretch(1)
         layout.addWidget(playlist_label)
         layout.addWidget(self.playlist)
@@ -76,11 +84,26 @@ class BottomBar(QFrame):
     def chosen_format(self) -> str:
         return str(self.format.currentData() or "mp3")
 
+    def primary_text(self) -> str:
+        return "Add to Spotify" if self.connected else "Prepare for Spotify"
+
+    def set_connected(self, connected: bool) -> None:
+        self.connected = connected
+        self.spotify.setText("Spotify connected" if connected else "Connect Spotify\u2026")
+        self.spotify.setToolTip(
+            "Songs already on Spotify are added straight to your playlist."
+            if connected
+            else "Connect to add songs that are already on Spotify directly, "
+            "instead of as local files."
+        )
+        if not self.running:
+            self.primary.setText(self.primary_text())
+
     def set_running(self, running: bool) -> None:
         self.running = running
-        self.primary.setText("Cancel" if running else "Prepare for Spotify")
+        self.primary.setText("Cancel" if running else self.primary_text())
         self.primary.setDefault(not running)
-        for widget in (self.add_button, self.playlist, self.format):
+        for widget in (self.add_button, self.playlist, self.format, self.spotify):
             widget.setEnabled(not running)
 
     def set_can_prepare(self, enabled: bool) -> None:
