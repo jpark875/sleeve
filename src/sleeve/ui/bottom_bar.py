@@ -35,13 +35,13 @@ class BottomBar(QFrame):
         playlist_label.setBuddy(self.playlist)
 
         self.format = QComboBox()
+        self.format.setToolTip("Used for songs Sleeve saves as files for Local Files.")
         format_label = QLabel("Format:")
         format_label.setBuddy(self.format)
 
-        self.spotify = QPushButton()
-        self.spotify.setFlat(True)
-        self.spotify.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.spotify.clicked.connect(self.spotify_clicked)
+        self.spotify = QLabel()
+        self.spotify.setTextFormat(Qt.TextFormat.RichText)
+        self.spotify.linkActivated.connect(lambda _link: self.spotify_clicked.emit())
 
         self.primary = QPushButton("Prepare for Spotify")
         self.primary.setDefault(True)
@@ -89,7 +89,9 @@ class BottomBar(QFrame):
 
     def set_connected(self, connected: bool) -> None:
         self.connected = connected
-        self.spotify.setText("Spotify connected" if connected else "Connect Spotify\u2026")
+        self.spotify.setText(
+            "Connected to Spotify" if connected else "<a href='connect'>Connect Spotify\u2026</a>"
+        )
         self.spotify.setToolTip(
             "Songs already on Spotify are added straight to your playlist."
             if connected

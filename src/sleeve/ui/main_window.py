@@ -357,8 +357,8 @@ class MainWindow(QMainWindow):
                 continue
             if track.match.state is MatchState.KEEP_LOCAL and not force:
                 continue
-            if track.match.state is not MatchState.UNCHECKED:
-                self.model.set_match(track_id, Match(MatchState.UNCHECKED))
+            if track.match.state is not MatchState.SEARCHING:
+                self.model.set_match(track_id, Match(MatchState.SEARCHING))
             self.match_queue.add(track_id)
         self.match_timer.start()
 
@@ -371,7 +371,7 @@ class MainWindow(QMainWindow):
         items = []
         for track_id in sorted(self.match_queue, key=self.model.row_of):
             track = self.model.track(track_id)
-            if track is not None and track.match.state is MatchState.UNCHECKED:
+            if track is not None and track.match.state in _PENDING:
                 items.append((track_id, track.wanted()))
                 self.model.set_match(track_id, Match(MatchState.SEARCHING))
         self.match_queue.clear()
@@ -431,8 +431,20 @@ class MainWindow(QMainWindow):
         tracks = self.model.tracks
         found = sum(t.match.state is MatchState.FOUND for t in tracks)
         review = sum(t.match.state is MatchState.REVIEW for t in tracks)
-        missing = sum(t.match.state is MatchState.NOT_FOUND for t in tracks)
-        text = f"{found} on Spotify, {missing} not found."
+        local = sum(
+            not t.on_spotify and t.has_file and t.match.state is not MatchState.REVIEW
+            for t in tracks
+        )
+        missing = sum(
+            not t.on_spotify and not t.has_file and t.match.state is not MatchState.REVIEW
+            for t in tracks
+        )
+        parts = [f"{found} on Spotify."]
+        if local:
+            parts.append(f"{_plural(local, 'song')} will be added as local files.")
+        if missing:
+            parts.append(f"{missing} not found.")
+        text = " ".join(parts)
         if review:
             self.set_message(
                 f"{text} {review} need{'s' if review == 1 else ''} a quick check —",
@@ -495,7 +507,15 @@ class MainWindow(QMainWindow):
             parts.append(f"{_plural(rejected, 'file')} skipped (not audio or unreadable).")
         if not added and not rejected:
             parts.append("No audio files found there.")
-        if not self.matching and not self.match_queue:
+        orphans = sum(not t.has_file for t in self.model.tracks)
+        if orphans and not self.connected:
+            self.set_message(
+                f"{' '.join(parts)} {_plural(orphans, 'song')} {'has' if orphans == 1 else 'have'} "
+                "no file on this computer \u2014",
+                "connect",
+                "connect Spotify to add them from there",
+            )
+        elif not self.matching and not self.match_queue:
             self.set_message(" ".join(parts))
         self._update_state()
 
@@ -687,9 +707,13 @@ class MainWindow(QMainWindow):
         box.setText(
             f"{_plural(len(review), 'song')} might be on Spotify, but the match isn't certain."
         )
-        box.setInformativeText("Check them now, or use your own files for those songs.")
+        box.setInformativeText(
+            "Check it now, or skip the Spotify version."
+            if len(review) == 1
+            else "Check them now, or skip the Spotify versions."
+        )
         check = box.addButton("Check…", QMessageBox.ButtonRole.AcceptRole)
-        own = box.addButton("Use my files", QMessageBox.ButtonRole.DestructiveRole)
+        own = box.addButton("Skip", QMessageBox.ButtonRole.DestructiveRole)
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(check)
         box.exec()
@@ -839,8 +863,17 @@ class MainWindow(QMainWindow):
         self.set_message(text, "details" if has_details else "", "Details")
         dialog = FinishDialog(report, self)
         dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.finished.connect(self._finish_closed)
         self._dialog = dialog
         dialog.open()
+
+    def _finish_closed(self) -> None:
+        dialog = self._dialog
+        if isinstance(dialog, FinishDialog) and dialog.start_over:
+            self.clear_list()
+            self.bottom.playlist.setEditText("")
+            self.set_message("Ready for the next playlist. Undo brings the last list back.")
+            self.bottom.focus_playlist()
 
     def show_details(self, *args: object) -> None:
         if self.last_summary is None:

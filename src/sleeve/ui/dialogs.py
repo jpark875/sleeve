@@ -191,6 +191,14 @@ def _songs(n: int) -> str:
     return f"{n} song{'s' if n != 1 else ''}"
 
 
+def _are(n: int) -> str:
+    return "is" if n == 1 else "are"
+
+
+def _were(n: int) -> str:
+    return "was" if n == 1 else "were"
+
+
 class FinishDialog(QDialog):
     def __init__(self, report: RunReport, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -210,13 +218,16 @@ class FinishDialog(QDialog):
 
         lines = []
         if report.added and report.already:
-            lines.append(f"{_songs(report.already)} were already in the playlist.")
+            lines.append(
+                f"{_songs(report.already)} {_were(report.already)} already in the playlist."
+            )
         if report.spotify_error:
             lines.append(f"Spotify: {_escape(report.spotify_error)}")
         if report.missing:
             lines.append(
-                f"{_songs(report.missing)} weren't found on Spotify, and their files aren't on "
-                "this computer."
+                f"{_songs(report.missing)} {_were(report.missing)}n't found on Spotify, and "
+                f"{'its file isn' if report.missing == 1 else 'their files aren'}'t on this "
+                "computer."
             )
         if report.summary and (problems := report.summary.problems()):
             lines.append(f"{problems.capitalize()} \u2014 see details in the main window.")
@@ -228,8 +239,9 @@ class FinishDialog(QDialog):
         if local:
             if report.connected and (report.added or report.already):
                 intro = QLabel(
-                    f"<br>{_songs(local)} aren't on Spotify, so {APP_NAME} saved your own "
-                    f"files. Add them to <b>{name}</b> from Local Files:"
+                    f"<br>{_songs(local)} {_are(local)}n't on Spotify, so {APP_NAME} saved your "
+                    f"own {'file' if local == 1 else 'files'}. Add "
+                    f"{'it' if local == 1 else 'them'} to <b>{name}</b> from Local Files:"
                 )
                 intro.setWordWrap(True)
                 layout.addWidget(intro)
@@ -260,11 +272,20 @@ class FinishDialog(QDialog):
         if report.playlist_uri:
             open_button.setText("Open playlist")
         buttons.addButton(open_button, QDialogButtonBox.ButtonRole.ActionRole)
+        self.start_over = False
+        fresh = QPushButton("New playlist")
+        fresh.setToolTip("Clear the list and start another playlist.")
+        fresh.clicked.connect(self._start_over)
+        buttons.addButton(fresh, QDialogButtonBox.ButtonRole.ResetRole)
         done = buttons.addButton("Done", QDialogButtonBox.ButtonRole.AcceptRole)
         done.setDefault(True)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
         self.setMinimumWidth(560)
+
+    def _start_over(self) -> None:
+        self.start_over = True
+        self.accept()
 
 
 class PlaylistPicker(QDialog):
@@ -442,7 +463,8 @@ def about(parent: QWidget) -> None:
     QMessageBox.about(
         parent,
         f"About {APP_NAME}",
-        f"<b>{APP_NAME}</b> {__version__}<p>Gets your own audio files ready for Spotify "
-        "Local Files.</p><p>Uses FFmpeg (ffmpeg.org), Qt for Python and Mutagen. "
+        f"<b>{APP_NAME}</b> {__version__}<p>Moves your music into Spotify: songs it "
+        "already has go straight to your playlist, the rest become local files.</p>"
+        "<p>Uses FFmpeg (ffmpeg.org), Qt for Python and Mutagen. "
         "See THIRD_PARTY.md for licenses.</p>",
     )

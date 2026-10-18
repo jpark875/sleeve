@@ -98,7 +98,7 @@ class Track:
 _OUTCOME_TEXT = {
     Outcome.READY: "Ready",
     Outcome.UPDATED: "Updated",
-    Outcome.DUPLICATE: "Already there",
+    Outcome.DUPLICATE: "Already prepared",
     Outcome.SKIPPED: "Skipped",
     Outcome.FAILED: "Failed",
     Outcome.CANCELLED: "Cancelled",
@@ -118,6 +118,7 @@ _MATCH_TEXT = {
     MatchState.SEARCHING: "Searching\u2026",
     MatchState.FOUND: "On Spotify",
     MatchState.REVIEW: "Check match",
+    MatchState.KEEP_LOCAL: "Your file",
 }
 MATCH_FIELDS = {"title", "artist", "album", "album_artist", "isrc"}
 
@@ -183,6 +184,8 @@ class TrackModel(QAbstractTableModel):
             return "Converting" if track.detected.action is Action.CONVERT else "Copying"
         if text := self._status_text.get(track.id):
             return text
+        if track.match.state is MatchState.NOT_FOUND:
+            return "Not on Spotify" if track.has_file else "Not found"
         return _MATCH_TEXT.get(track.match.state) or track.plan_text()
 
     def status_tip(self, track: Track) -> str:

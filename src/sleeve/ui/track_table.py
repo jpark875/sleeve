@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from sleeve.core.matching import MatchState
 from sleeve.ui.track_model import EDITABLE, Column, State, Track, TrackModel
 
 ROW_HEIGHT = 30
@@ -35,6 +36,14 @@ class TrackDelegate(QStyledItemDelegate):
         if col == Column.STATUS and track.state is State.WORKING:
             self._paint_progress(painter, option, track)
             return
+        if (
+            col == Column.STATUS
+            and track.state is State.IDLE
+            and track.match.state is MatchState.REVIEW
+        ):
+            option.palette.setColor(
+                QPalette.ColorRole.Text, option.palette.color(QPalette.ColorRole.Link)
+            )
         if col == Column.STATUS and track.state is State.PROBLEM:
             option.palette.setColor(
                 QPalette.ColorRole.Text, option.palette.color(QPalette.ColorRole.PlaceholderText)
@@ -66,10 +75,6 @@ class TrackDelegate(QStyledItemDelegate):
             source = QRect(0, 0, round(ART_SIZE * dpr), round(ART_SIZE * dpr))
             source.moveCenter(pixmap.rect().center())
             painter.drawPixmap(rect, pixmap, source)
-        else:
-            painter.setPen(option.palette.color(QPalette.ColorRole.Mid))
-            painter.setBrush(option.palette.color(QPalette.ColorRole.AlternateBase))
-            painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 2, 2)
         painter.restore()
 
     def _paint_progress(

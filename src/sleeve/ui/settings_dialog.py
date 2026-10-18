@@ -48,12 +48,6 @@ class SettingsDialog(QDialog):
         row.addWidget(choose)
         form.addRow("Save to:", row)
 
-        self.format = QComboBox()
-        self.format.addItem("MP3", "mp3")
-        self.format.addItem("M4A (AAC)", "m4a")
-        self.format.setCurrentIndex(0 if settings.format == "mp3" else 1)
-        form.addRow("Convert to:", self.format)
-
         self.mp3 = QComboBox()
         for kbps in MP3_BITRATES:
             self.mp3.addItem(f"{kbps} kbps (constant)", kbps)
@@ -143,7 +137,6 @@ class SettingsDialog(QDialog):
     def apply(self) -> None:
         s = self.settings
         s.output_root = self.folder.text()
-        s.format = str(self.format.currentData())
         s.mp3_bitrate = int(self.mp3.currentData())
         s.aac_bitrate = int(self.aac.currentData())
         s.pattern = str(self.pattern.currentData())

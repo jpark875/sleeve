@@ -270,7 +270,7 @@ def test_connected_flow_adds_catalog_songs_and_prepares_the_rest(
         MatchState.NOT_FOUND,
     ]
     statuses = [window.model.data(window.model.index(r, Column.STATUS)) for r in range(4)]
-    assert statuses == ["On Spotify", "Will convert", "On Spotify", "No file"]
+    assert statuses == ["On Spotify", "Not on Spotify", "On Spotify", "Not found"]
 
     window.bottom.playlist.setEditText("Road Trip")
     window.prepare()
@@ -386,3 +386,26 @@ def test_dropping_a_folder_names_the_playlist(
     window.add_paths([folder])
     qtbot.waitUntil(lambda: window.scanning == 0 and len(window.model.tracks) == 1, timeout=5000)
     assert window.bottom.playlist_name() == "Garage Demos"
+
+
+def test_new_playlist_clears_the_list(
+    connected: MainWindow, qtbot: QtBot, tmp_path: Path, data_dir: Path
+) -> None:
+    window = connected
+    add_mixed(window, tmp_path, data_dir)
+    window.bottom.playlist.setEditText("Road Trip")
+    window.prepare()
+    qtbot.waitUntil(lambda: isinstance(window._dialog, FinishDialog), timeout=15000)
+    window._dialog._start_over()
+    assert window.model.tracks == []
+    assert window.bottom.playlist_name() == ""
+    window.act_undo.trigger()
+    assert len(window.model.tracks) == 4
+
+
+def test_orphans_suggest_connecting(window: MainWindow, qtbot: QtBot, tmp_path: Path) -> None:
+    playlist = tmp_path / "Streamed.m3u8"
+    playlist.write_text("#EXTINF:200,Band - Song\nmissing.mp3\n")
+    window.add_paths([playlist])
+    qtbot.waitUntil(lambda: window.scanning == 0 and len(window.model.tracks) == 1, timeout=5000)
+    assert "connect Spotify" in window.message.text()

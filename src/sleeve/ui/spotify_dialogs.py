@@ -74,6 +74,8 @@ class ConnectDialog(QDialog):
 
         self.redirect = QLineEdit(redirect_uri(settings.spotify_redirect_port))
         self.redirect.setReadOnly(True)
+        self.redirect.setMinimumWidth(270)
+        self.redirect.setCursorPosition(0)
         copy = QPushButton("Copy")
         copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.redirect.text()))
         step(2, "Under <b>Redirect URIs</b>, add exactly:", self.redirect, copy)
@@ -100,7 +102,7 @@ class ConnectDialog(QDialog):
         layout.addWidget(self.buttons)
         self.client_id.textChanged.connect(self._update)
         self._update()
-        self.setMinimumWidth(600)
+        self.setMinimumWidth(720)
 
     def _update(self) -> None:
         if self._cancel is None:
