@@ -235,7 +235,7 @@ def test_add_tracks_skips_existing_and_chunks() -> None:
         ok(existing), ok({"snapshot_id": "a"}, 201), ok({"snapshot_id": "b"}, 201)
     )
     client = SpotifyClient("cid", MemoryStore(fresh()), transport)
-    assert client.add_tracks("pl", uris) == 150
+    assert len(client.add_tracks("pl", uris)) == 150
     posts = [c for c in transport.calls if c[0] == "POST"]
     assert [c[1] for c in posts] == ["https://api.spotify.com/v1/playlists/pl/items"] * 2
     first = json.loads(posts[0][3] or b"{}")["uris"]

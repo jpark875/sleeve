@@ -208,8 +208,8 @@ class SpotifyClient:
             url = page.get("next")
         return uris
 
-    def add_tracks(self, playlist_id: str, uris: list[str]) -> int:
-        """Append uris in order, skipping ones already there; returns how many were added."""
+    def add_tracks(self, playlist_id: str, uris: list[str]) -> list[str]:
+        """Append uris in order, skipping ones already there; returns the ones added."""
         present = self.playlist_uris(playlist_id)
         fresh = []
         for uri in uris:
@@ -222,4 +222,4 @@ class SpotifyClient:
                 f"/playlists/{playlist_id}/items",
                 {"uris": fresh[start : start + ADD_CHUNK]},
             )
-        return len(fresh)
+        return fresh
