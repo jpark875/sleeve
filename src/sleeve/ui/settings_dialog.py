@@ -1,9 +1,5 @@
-import threading
-import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -20,11 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sleeve import APP_NAME
 from sleeve.core.names import PATTERNS, render_stem
 from sleeve.settings import AAC_BITRATES, MP3_BITRATES, Settings
-from sleeve.spotify.auth import AuthError, TokenStore, redirect_uri, sign_in
-from sleeve.ui.workers import TaskWorker
+from sleeve.spotify.auth import TokenStore
 
 _PATTERN_LABELS = {
     "artist_title": "Artist - Title",
@@ -42,7 +36,6 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.settings = settings
         self.store = store
-        self._cancel_sign_in: threading.Event | None = None
 
         files = QGroupBox("Files")
         form = QFormLayout(files)
@@ -85,31 +78,8 @@ class SettingsDialog(QDialog):
         note.setWordWrap(True)
         form.addRow("", note)
 
-        spotify = QGroupBox("Spotify (optional)")
+        spotify = QGroupBox("Spotify")
         sform = QFormLayout(spotify)
-        about = QLabel(
-            f"Connecting lets {APP_NAME} create the playlist for you. Everything else works "
-            "without it. You need your own app in the Spotify Developer Dashboard; paste its "
-            "Client ID here and add the redirect URI below to it."
-        )
-        about.setWordWrap(True)
-        sform.addRow(about)
-        self.client_id = QLineEdit(settings.spotify_client_id)
-        self.client_id.setPlaceholderText("Client ID from developer.spotify.com")
-        sform.addRow("Client ID:", self.client_id)
-        self.port = QSpinBox()
-        self.port.setRange(1024, 65535)
-        self.port.setValue(settings.spotify_redirect_port)
-        self.redirect = QLineEdit()
-        self.redirect.setReadOnly(True)
-        copy = QPushButton("Copy")
-        copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.redirect.text()))
-        self.port.valueChanged.connect(self._update_redirect)
-        redirect_row = QHBoxLayout()
-        redirect_row.addWidget(self.redirect, 1)
-        redirect_row.addWidget(copy)
-        sform.addRow("Redirect URI:", redirect_row)
-        sform.addRow("Port:", self.port)
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.connect_button = QPushButton()
@@ -117,8 +87,16 @@ class SettingsDialog(QDialog):
         status_row = QHBoxLayout()
         status_row.addWidget(self.status, 1)
         status_row.addWidget(self.connect_button)
-        sform.addRow(status_row)
-        self._update_redirect()
+        sform.addRow("Account:", status_row)
+        self.client_id = QLineEdit(settings.spotify_client_id)
+        self.client_id.setPlaceholderText("From your app in the Spotify Developer Dashboard")
+        sform.addRow("Client ID:", self.client_id)
+        self.port = QSpinBox()
+        self.port.setRange(1024, 65535)
+        self.port.setValue(settings.spotify_redirect_port)
+        self.port.setToolTip("Change only if another app uses this port, then update the "
+                             "redirect URI in the Spotify Developer Dashboard.")  # fmt: skip
+        sform.addRow("Sign-in port:", self.port)
         self._refresh_status()
 
         buttons = QDialogButtonBox(
@@ -132,20 +110,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
         self.setMinimumWidth(560)
 
-    def _update_redirect(self) -> None:
-        self.redirect.setText(redirect_uri(self.port.value()))
-
-    def _refresh_status(self, message: str = "") -> None:
+    def _refresh_status(self) -> None:
         connected = self.store.load() is not None
-        if message:
-            self.status.setText(message)
-        elif connected:
+        if connected:
             where = "" if self.store.persistent else " (until you quit; no keychain found)"
-            self.status.setText(f"Connected{where}.")
+            self.status.setText(f"Connected{where}")
         else:
-            self.status.setText("Not connected.")
-        self.connect_button.setText("Disconnect" if connected else "Connect…")
-        self.connect_button.setEnabled(True)
+            self.status.setText("Not connected")
+        self.connect_button.setText("Disconnect" if connected else "Connect\u2026")
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -155,52 +127,18 @@ class SettingsDialog(QDialog):
             self.folder.setText(str(Path(folder)))
 
     def _toggle_connection(self) -> None:
-        if self._cancel_sign_in is not None:
-            self._cancel_sign_in.set()
-            return
         if self.store.load() is not None:
             self.store.clear()
             self._refresh_status()
             return
-        client_id = self.client_id.text().strip()
-        if not client_id:
-            self._refresh_status("Paste your Client ID first.")
-            return
-        cancel = threading.Event()
-        self._cancel_sign_in = cancel
-        port = self.port.value()
-        self.status.setText("Finish signing in in your browser…")
-        self.connect_button.setText("Cancel")
+        from sleeve.ui.spotify_dialogs import ConnectDialog
 
-        def describe(exc: Exception) -> str:
-            return exc.message if isinstance(exc, AuthError) else "Sign-in failed. Try again."
-
-        worker = TaskWorker(
-            lambda: sign_in(client_id, port, webbrowser.open, cancel=cancel), describe
-        )
-        worker.signals.done.connect(self._signed_in)
-        worker.signals.failed.connect(self._sign_in_failed)
-        QThreadPool.globalInstance().start(worker)
-
-    def _signed_in(self, token: object) -> None:
-        from sleeve.spotify.auth import Token
-
-        self._cancel_sign_in = None
-        if isinstance(token, Token):
-            self.store.save(token)
-            self.settings.spotify_client_id = self.client_id.text().strip()
-            self.settings.spotify_redirect_port = self.port.value()
-            self.settings.save()
+        self.settings.spotify_client_id = self.client_id.text().strip()
+        self.settings.spotify_redirect_port = self.port.value()
+        dialog = ConnectDialog(self.settings, self.store, self)
+        dialog.exec()
+        self.client_id.setText(self.settings.spotify_client_id)
         self._refresh_status()
-
-    def _sign_in_failed(self, message: str) -> None:
-        self._cancel_sign_in = None
-        self._refresh_status(message)
-
-    def done(self, result: int) -> None:
-        if self._cancel_sign_in is not None:
-            self._cancel_sign_in.set()
-        super().done(result)
 
     def apply(self) -> None:
         s = self.settings
