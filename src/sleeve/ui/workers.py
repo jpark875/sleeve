@@ -3,16 +3,21 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from sleeve.core.errors import SleeveError
-from sleeve.core.formats import Kind, detect, is_candidate
+from sleeve.core.formats import Detected, Kind, detect, is_candidate
+from sleeve.core.library import Entry
+from sleeve.core.matching import Match, MatchState, Wanted
 from sleeve.core.names import guess_from_filename
 from sleeve.core.pipeline import Job, Options, Summary, prepare
-from sleeve.core.tags import read_tags
+from sleeve.core.tags import Tags, read_tags
+from sleeve.spotify.api import SpotifyError
+from sleeve.spotify.matcher import Matcher
 from sleeve.ui.track_model import Track
 
 log = logging.getLogger(__name__)
@@ -153,3 +158,92 @@ class TaskWorker(QRunnable):
             self.signals.failed.emit(self.describe(exc))
             return
         self.signals.done.emit(value)
+
+
+def track_from_entry(entry: Entry) -> Track:
+    """A track for a playlist entry: the real file when it exists, otherwise just its details."""
+    if entry.path is not None and entry.path.is_file():
+        try:
+            detected = detect(entry.path)
+        except OSError:
+            detected = Detected(Kind.UNKNOWN)
+        if detected.kind is not Kind.UNKNOWN:
+            tags = read_tags(entry.path)
+            for name in ("title", "artist", "album", "album_artist", "year", "genre"):
+                if not getattr(tags, name):
+                    setattr(tags, name, getattr(entry, name))
+            tags.track = tags.track or entry.track
+            if not tags.title:
+                tags.title = guess_from_filename(entry.path.name)[1]
+            return Track(entry.path, detected, tags)
+    tags = Tags(
+        title=entry.title, artist=entry.artist, album=entry.album,
+        album_artist=entry.album_artist, track=entry.track, year=entry.year, genre=entry.genre,
+    )  # fmt: skip
+    source = entry.path or Path(entry.title or "Untitled")
+    return Track(source, Detected(Kind.UNKNOWN, duration=entry.duration), tags, has_file=False)
+
+
+class ImportWorker(QRunnable):
+    def __init__(self, entries: list[Entry], cancel: threading.Event) -> None:
+        super().__init__()
+        self.entries = entries
+        self.cancel = cancel
+        self.signals = _ScanSignals()
+
+    def run(self) -> None:
+        batch: list[Track] = []
+        for entry in self.entries:
+            if self.cancel.is_set():
+                break
+            batch.append(track_from_entry(entry))
+            if len(batch) >= 50:
+                self.signals.found.emit(batch)
+                batch = []
+        if batch:
+            self.signals.found.emit(batch)
+        self.signals.finished.emit(len(self.entries), 0)
+
+
+class _MatchSignals(QObject):
+    matched = Signal(int, object)
+    waiting = Signal(float)
+    failed = Signal(str)
+    finished = Signal()
+
+
+class MatchWorker(QRunnable):
+    """Looks up each song on Spotify. A Spotify-wide problem stops the run with one message."""
+
+    def __init__(
+        self, items: list[tuple[int, Wanted]], matcher: Matcher, cancel: threading.Event
+    ) -> None:
+        super().__init__()
+        self.items = items
+        self.matcher = matcher
+        self.cancel = cancel
+        self.signals = _MatchSignals()
+
+    def _one(self, item: tuple[int, Wanted]) -> None:
+        track_id, wanted = item
+        if self.cancel.is_set():
+            return
+        try:
+            match = self.matcher.match(wanted)
+        except SpotifyError as exc:
+            if not self.cancel.is_set():
+                self.cancel.set()
+                self.signals.failed.emit(exc.message)
+            return
+        except Exception:
+            log.exception("matching %s failed", wanted)
+            match = Match(MatchState.ERROR, message="Couldn't search Spotify for this song.")
+        self.signals.matched.emit(track_id, match)
+
+    def run(self) -> None:
+        try:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                list(pool.map(self._one, self.items))
+        finally:
+            self.matcher.cache.save()
+            self.signals.finished.emit()

@@ -4,10 +4,18 @@ from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersistentModelIndex, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QObject,
+    QPersistentModelIndex,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QImage, QPixmap, QUndoCommand, QUndoStack
 
 from sleeve.core.formats import Action, Detected, Kind
+from sleeve.core.matching import Match, MatchState, Wanted
 from sleeve.core.pipeline import Outcome, Result
 from sleeve.core.tags import Artwork, Tags
 
@@ -55,8 +63,30 @@ class Track:
     progress: float = 0.0
     message: str = ""
     output: Path | None = None
+    has_file: bool = True
+    match: Match = field(default_factory=lambda: Match(MatchState.UNCHECKED))
+
+    def key(self) -> tuple[str, ...]:
+        if self.has_file:
+            return (str(self.source),)
+        return (self.tags.title.casefold(), self.tags.artist.casefold())
+
+    def wanted(self) -> Wanted:
+        return Wanted(
+            self.tags.title,
+            self.tags.artist or self.tags.album_artist,
+            self.tags.album,
+            self.detected.duration,
+            self.tags.isrc,
+        )
+
+    @property
+    def on_spotify(self) -> bool:
+        return self.match.uri is not None
 
     def plan_text(self) -> str:
+        if not self.has_file:
+            return "No file"
         if self.detected.protected:
             return "Copy-protected"
         action = self.detected.action
@@ -84,10 +114,21 @@ def format_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
+_MATCH_TEXT = {
+    MatchState.SEARCHING: "Searching\u2026",
+    MatchState.FOUND: "On Spotify",
+    MatchState.REVIEW: "Check match",
+}
+MATCH_FIELDS = {"title", "artist", "album", "album_artist", "isrc"}
+
+
 class TrackModel(QAbstractTableModel):
+    tags_edited = Signal(list)
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.tracks: list[Track] = []
+        self._rows: dict[int, int] | None = None
         self.undo = QUndoStack(self)
         self.locked = False
         self._thumbs: dict[str, QPixmap] = {}
@@ -140,7 +181,27 @@ class TrackModel(QAbstractTableModel):
     def status_text(self, track: Track) -> str:
         if track.state is State.WORKING:
             return "Converting" if track.detected.action is Action.CONVERT else "Copying"
-        return self._status_text.get(track.id) or track.plan_text()
+        if text := self._status_text.get(track.id):
+            return text
+        return _MATCH_TEXT.get(track.match.state) or track.plan_text()
+
+    def status_tip(self, track: Track) -> str:
+        if track.message:
+            return track.message
+        chosen = track.match.chosen or (track.match.candidates or (None,))[0]
+        if track.match.state is MatchState.FOUND and chosen:
+            return f"On Spotify: {chosen.describe()}"
+        if track.match.state is MatchState.REVIEW and chosen:
+            return f"Possible match: {chosen.describe()}. Double-click to check."
+        if track.match.state is MatchState.NOT_FOUND:
+            return "Not found on Spotify." + (
+                " Sleeve will prepare your file instead." if track.has_file else ""
+            )
+        if track.match.state is MatchState.KEEP_LOCAL:
+            return "You chose to use your own file."
+        if not track.has_file:
+            return f"The file isn't on this computer ({track.source})."
+        return ""
 
     def data(self, index: Index, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
@@ -157,10 +218,10 @@ class TrackModel(QAbstractTableModel):
             if col is Column.STATUS:
                 return self.status_text(track)
         if role == Qt.ItemDataRole.ToolTipRole:
-            if col is Column.STATUS and track.message:
-                return track.message
+            if col is Column.STATUS:
+                return self.status_tip(track) or None
             if col in (Column.TITLE, Column.ART):
-                return str(track.source)
+                return str(track.source) if track.has_file else None
         if role == Qt.ItemDataRole.TextAlignmentRole and col is Column.TIME:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if role == Qt.ItemDataRole.UserRole:
@@ -179,10 +240,12 @@ class TrackModel(QAbstractTableModel):
         return True
 
     def row_of(self, track_id: int) -> int:
-        for row, track in enumerate(self.tracks):
-            if track.id == track_id:
-                return row
-        return -1
+        if self._rows is None:
+            self._rows = {t.id: row for row, t in enumerate(self.tracks)}
+        return self._rows.get(track_id, -1)
+
+    def _rows_changed(self) -> None:
+        self._rows = None
 
     def track(self, track_id: int) -> Track | None:
         row = self.row_of(track_id)
@@ -213,20 +276,42 @@ class TrackModel(QAbstractTableModel):
         self._status_text.pop(track_id, None)
         self.tracks[row].state = State.IDLE
         self.refresh_row(row)
+        if name in MATCH_FIELDS:
+            self.tags_edited.emit([track_id])
 
-    def add(self, tracks: list[Track]) -> int:
-        known = {t.source for t in self.tracks}
+    def set_match(self, track_id: int, match: Match) -> None:
+        row = self.row_of(track_id)
+        if row < 0:
+            return
+        self.tracks[row].match = match
+        self._status_text.pop(track_id, None)
+        self.refresh_row(row)
+
+    def set_status(
+        self, track_id: int, text: str, message: str = "", *, problem: bool = False
+    ) -> None:
+        row = self.row_of(track_id)
+        if row < 0:
+            return
+        self._status_text[track_id] = text
+        self.tracks[row].state = State.PROBLEM if problem else State.DONE
+        self.tracks[row].message = message
+        self.refresh_row(row)
+
+    def add(self, tracks: list[Track]) -> list[Track]:
+        known = {t.key() for t in self.tracks}
         fresh = []
         for t in tracks:
-            if t.source not in known:
-                known.add(t.source)
+            if t.key() not in known:
+                known.add(t.key())
                 fresh.append(t)
         if fresh:
             start = len(self.tracks)
             self.beginInsertRows(QModelIndex(), start, start + len(fresh) - 1)
             self.tracks.extend(fresh)
+            self._rows_changed()
             self.endInsertRows()
-        return len(fresh)
+        return fresh
 
     def remove_rows(self, rows: list[int]) -> None:
         rows = sorted({r for r in rows if 0 <= r < len(self.tracks)})
@@ -236,17 +321,20 @@ class TrackModel(QAbstractTableModel):
     def _take(self, row: int) -> None:
         self.beginRemoveRows(QModelIndex(), row, row)
         del self.tracks[row]
+        self._rows_changed()
         self.endRemoveRows()
 
     def _put(self, row: int, track: Track) -> None:
         row = min(row, len(self.tracks))
         self.beginInsertRows(QModelIndex(), row, row)
         self.tracks.insert(row, track)
+        self._rows_changed()
         self.endInsertRows()
 
     def clear(self) -> None:
         self.beginResetModel()
         self.tracks.clear()
+        self._rows_changed()
         self._status_text.clear()
         self.endResetModel()
         self.undo.clear()
