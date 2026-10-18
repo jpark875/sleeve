@@ -1,15 +1,21 @@
 import json
 import logging
+import threading
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from sleeve.core.matching import Candidate
 from sleeve.spotify.auth import AuthError, Token, refresh
 from sleeve.spotify.http import NetworkError, Response, Transport, urllib_transport
 
 log = logging.getLogger(__name__)
 
 API = "https://api.spotify.com/v1"
+SEARCH_LIMIT = 10
+ADD_CHUNK = 100
+MAX_WAIT = 120.0
 
 
 class Store(Protocol):
@@ -30,6 +36,28 @@ class Playlist:
     id: str
     name: str
     uri: str
+
+
+def _retry_after(resp: Response) -> float:
+    raw = resp.headers.get("Retry-After") or resp.headers.get("retry-after") or ""
+    try:
+        return max(1.0, min(float(raw), 60.0))
+    except ValueError:
+        return 5.0
+
+
+def _candidate(item: dict[str, Any]) -> Candidate | None:
+    try:
+        return Candidate(
+            uri=str(item["uri"]),
+            name=str(item.get("name", "")),
+            artists=tuple(str(a.get("name", "")) for a in item.get("artists") or []),
+            album=str((item.get("album") or {}).get("name", "")),
+            duration=float(item.get("duration_ms") or 0) / 1000,
+            isrc=str((item.get("external_ids") or {}).get("isrc", "")).upper(),
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
 
 
 def explain(resp: Response) -> SpotifyError:
@@ -62,6 +90,8 @@ def explain(resp: Response) -> SpotifyError:
             "the app's user list in the Spotify Developer Dashboard. "
             "Your files are ready; create the playlist in Spotify yourself."
         )
+    if resp.status == 404:
+        return SpotifyError("Spotify couldn't find that playlist. It may have been deleted.")
     if resp.status >= 500:
         return SpotifyError("Spotify is having trouble right now. Try again later.")
     return SpotifyError(f"Spotify returned an error ({resp.status}). Try again later.")
@@ -74,6 +104,9 @@ class SpotifyClient:
         self.client_id = client_id
         self.store = store
         self.transport = transport
+        self.patient = True
+        self.cancel = threading.Event()
+        self.on_wait: Callable[[float], None] | None = None
 
     def _token(self, force_refresh: bool = False) -> Token:
         token = self.store.load()
@@ -91,8 +124,10 @@ class SpotifyClient:
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         data = json.dumps(body).encode() if body is not None else None
         url = path if path.startswith("http") else f"{API}{path}"
-        for attempt in range(2):
-            token = self._token(force_refresh=attempt == 1)
+        refreshed = False
+        waited = 0.0
+        while True:
+            token = self._token(force_refresh=refreshed)
             headers = {"Authorization": f"Bearer {token.access_token}"}
             if data is not None:
                 headers["Content-Type"] = "application/json"
@@ -102,14 +137,22 @@ class SpotifyClient:
                 raise SpotifyError(
                     "Couldn't reach Spotify. Check your internet connection."
                 ) from exc
-            if resp.status == 401 and attempt == 0:
+            if resp.status == 401 and not refreshed:
+                refreshed = True
                 continue
+            if resp.status == 429 and self.patient:
+                wait = _retry_after(resp)
+                if waited + wait <= MAX_WAIT:
+                    log.info("rate limited, waiting %.0fs", wait)
+                    if self.on_wait:
+                        self.on_wait(wait)
+                    if self.cancel.wait(wait):
+                        raise SpotifyError("Cancelled.")
+                    waited += wait
+                    continue
             if resp.status >= 400:
                 raise explain(resp)
             return resp.json()
-        raise SpotifyError(
-            "Your Spotify sign-in expired. Connect again in Settings.", reconnect=True
-        )
 
     def me(self) -> dict[str, Any]:
         return dict(self._request("GET", "/me"))
@@ -133,7 +176,7 @@ class SpotifyClient:
         item = self._request(
             "POST",
             "/me/playlists",
-            {"name": name, "public": False, "description": "Local files prepared with Sleeve."},
+            {"name": name, "public": False, "description": "Made with Sleeve."},
         )
         try:
             return Playlist(item["id"], item["name"], item["uri"])
@@ -144,3 +187,39 @@ class SpotifyClient:
         user = self.me()
         existing = self.find_playlist(name, str(user.get("id", "")))
         return existing or self.create_playlist(name)
+
+    def search_tracks(self, query: str) -> list[Candidate]:
+        params = urllib.parse.urlencode(
+            {"q": query, "type": "track", "limit": SEARCH_LIMIT, "market": "from_token"}
+        )
+        page = self._request("GET", f"/search?{params}")
+        items = ((page or {}).get("tracks") or {}).get("items") or []
+        return [c for c in (_candidate(i) for i in items if i) if c is not None]
+
+    def playlist_uris(self, playlist_id: str) -> set[str]:
+        uris: set[str] = set()
+        url: str | None = f"/playlists/{playlist_id}/items?limit=50"
+        while url:
+            page = self._request("GET", url)
+            for entry in page.get("items") or []:
+                item = (entry or {}).get("item") or (entry or {}).get("track") or {}
+                if item.get("uri"):
+                    uris.add(str(item["uri"]))
+            url = page.get("next")
+        return uris
+
+    def add_tracks(self, playlist_id: str, uris: list[str]) -> int:
+        """Append uris in order, skipping ones already there; returns how many were added."""
+        present = self.playlist_uris(playlist_id)
+        fresh = []
+        for uri in uris:
+            if uri not in present:
+                present.add(uri)
+                fresh.append(uri)
+        for start in range(0, len(fresh), ADD_CHUNK):
+            self._request(
+                "POST",
+                f"/playlists/{playlist_id}/items",
+                {"uris": fresh[start : start + ADD_CHUNK]},
+            )
+        return len(fresh)

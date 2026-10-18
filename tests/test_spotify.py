@@ -199,3 +199,61 @@ def test_sign_in_cancel() -> None:
     with pytest.raises(AuthError) as info:
         auth.sign_in("cid", free_port(), lambda url: None, cancel=cancel)
     assert "cancelled" in info.value.message
+
+
+def track_json(name: str, uri: str, isrc: str = "") -> dict[str, object]:
+    return {
+        "uri": uri,
+        "name": name,
+        "artists": [{"name": "Artist"}],
+        "album": {"name": "LP"},
+        "duration_ms": 201000,
+        "external_ids": {"isrc": isrc},
+    }
+
+
+def test_search_parses_candidates() -> None:
+    transport = FakeTransport(
+        ok({"tracks": {"items": [track_json("Song", "spotify:track:1", "usabc1234567"), None]}})
+    )
+    client = SpotifyClient("cid", MemoryStore(fresh()), transport)
+    results = client.search_tracks('track:"song"')
+    assert len(results) == 1
+    assert results[0].artists == ("Artist",) and results[0].duration == 201.0
+    assert results[0].isrc == "USABC1234567"
+    url = transport.calls[0][1]
+    assert "limit=10" in url and "market=from_token" in url and "type=track" in url
+
+
+def test_add_tracks_skips_existing_and_chunks() -> None:
+    existing = {
+        "items": [{"item": {"uri": "spotify:track:0"}}, {"track": {"uri": "spotify:track:1"}}],
+        "next": None,
+    }
+    uris = [f"spotify:track:{i}" for i in range(0, 152)]
+    transport = FakeTransport(
+        ok(existing), ok({"snapshot_id": "a"}, 201), ok({"snapshot_id": "b"}, 201)
+    )
+    client = SpotifyClient("cid", MemoryStore(fresh()), transport)
+    assert client.add_tracks("pl", uris) == 150
+    posts = [c for c in transport.calls if c[0] == "POST"]
+    assert [c[1] for c in posts] == ["https://api.spotify.com/v1/playlists/pl/items"] * 2
+    first = json.loads(posts[0][3] or b"{}")["uris"]
+    assert len(first) == 100 and first[0] == "spotify:track:2"
+
+
+def test_rate_limit_waits_then_retries() -> None:
+    transport = FakeTransport(Response(429, b"{}", {"Retry-After": "1"}), ok({"id": "me"}))
+    client = SpotifyClient("cid", MemoryStore(fresh()), transport)
+    waits: list[float] = []
+    client.on_wait = waits.append
+    assert client.me() == {"id": "me"}
+    assert waits == [1.0]
+
+
+def test_rate_limit_can_be_cancelled() -> None:
+    transport = FakeTransport(Response(429, b"{}", {"Retry-After": "30"}))
+    client = SpotifyClient("cid", MemoryStore(fresh()), transport)
+    client.cancel.set()
+    with pytest.raises(SpotifyError):
+        client.me()
